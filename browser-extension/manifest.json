@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "LinkForge Sender",
+  "name": "CypherLinks Sender",
   "version": "1.0.0",
-  "description": "Send the current media page to the LinkForge desktop app.",
+  "description": "Send the current media page to the CypherLinks desktop app.",
   "permissions": ["activeTab", "contextMenus", "tabs"],
   "host_permissions": ["http://127.0.0.1:47653/*"],
   "background": { "service_worker": "background.js" },
   "action": {
-    "default_title": "Send to LinkForge",
+    "default_title": "Send to CypherLinks",
     "default_popup": "popup.html"
   }
 }

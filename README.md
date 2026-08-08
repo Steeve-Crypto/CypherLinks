@@ -1,6 +1,6 @@
-# LinkForge
+# CypherLinks
 
-LinkForge is a local-first desktop media downloader built with **Tauri 2, React, TypeScript, Rust, yt-dlp, and FFmpeg**. It is designed for media you own, public-domain/permitted media, or content you otherwise have authorization to download. It does not contain DRM or access-control bypass logic.
+CypherLinks is a local-first desktop media downloader built with **Tauri 2, React, TypeScript, Rust, yt-dlp, and FFmpeg**. It is designed for media you own, public-domain/permitted media, or content you otherwise have authorization to download. It does not contain DRM or access-control bypass logic.
 
 ## Current feature set
 
@@ -48,26 +48,26 @@ FFmpeg can create an additional optimized version after the source download fini
 
 ### Clipboard integration
 
-Enable **Settings → Clipboard detection**. LinkForge polls the local system clipboard and offers newly copied HTTP/HTTPS links in the Download workspace. It does not automatically download clipboard contents.
+Enable **Settings → Clipboard detection**. CypherLinks polls the local system clipboard and offers newly copied HTTP/HTTPS links in the Download workspace. It does not automatically download clipboard contents.
 
 ### Browser extension
 
-The `browser-extension/` directory contains a Manifest V3 Chromium extension. It sends the current tab or a context-menu link to LinkForge through a localhost-only bridge at `127.0.0.1:47653`.
+The `browser-extension/` directory contains a Manifest V3 Chromium extension. It sends the current tab or a context-menu link to CypherLinks through a localhost-only bridge at `127.0.0.1:47653`.
 
 To install it in Chrome or Edge:
 
-1. Run LinkForge.
+1. Run CypherLinks.
 2. Open **Settings → Browser extension → Open extension folder**.
 3. Open the browser's Extensions page.
 4. Enable **Developer mode**.
 5. Choose **Load unpacked**.
 6. Select the `browser-extension` directory.
 
-You can then click the LinkForge extension button or right-click a page/link and choose **Send … to LinkForge**.
+You can then click the CypherLinks extension button or right-click a page/link and choose **Send … to CypherLinks**.
 
 ### Per-site presets
 
-After configuring a download profile for a URL, click **Save site preset**. LinkForge stores the profile against the hostname and automatically reapplies it the next time that site is analyzed. Saved presets can be applied or deleted from **Settings → Site presets**.
+After configuring a download profile for a URL, click **Save site preset**. CypherLinks stores the profile against the hostname and automatically reapplies it the next time that site is analyzed. Saved presets can be applied or deleted from **Settings → Site presets**.
 
 Proxy values are intentionally not stored inside site presets.
 
@@ -187,4 +187,4 @@ The frontend TypeScript/TSX syntax and JSON configuration files can be validated
 
 ## Usage note
 
-Use LinkForge only for media you own, public-domain/permitted media, or content you otherwise have authorization to download. LinkForge intentionally does not implement DRM, paywall, or access-control bypassing.
+Use CypherLinks only for media you own, public-domain/permitted media, or content you otherwise have authorization to download. CypherLinks intentionally does not implement DRM, paywall, or access-control bypassing.

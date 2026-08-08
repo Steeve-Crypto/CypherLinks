@@ -11,6 +11,6 @@ button.addEventListener('click', async () => {
       status.textContent = chrome.runtime.lastError.message;
       return;
     }
-    status.textContent = result?.ok ? 'Sent to LinkForge.' : (result?.error || 'Could not send link.');
+    status.textContent = result?.ok ? 'Sent to CypherLinks.' : (result?.error || 'Could not send link.');
   });
 });

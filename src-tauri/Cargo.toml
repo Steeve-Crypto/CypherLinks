@@ -1,12 +1,12 @@
 [package]
-name = "linkforge"
+name = "cypherlinks"
 version = "0.1.0"
 description = "Local-first desktop media downloader"
-authors = ["LinkForge"]
+authors = ["CypherLinks"]
 edition = "2021"
 
 [lib]
-name = "linkforge_lib"
+name = "cypherlinks_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

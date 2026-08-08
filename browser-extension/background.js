@@ -7,13 +7,13 @@ async function sendUrl(url) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url })
   });
-  if (!response.ok) throw new Error('LinkForge is not running.');
+  if (!response.ok) throw new Error('CypherLinks is not running.');
   return response.json();
 }
 
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.contextMenus.create({ id: 'linkforge-page', title: 'Send page to LinkForge', contexts: ['page'] });
-  chrome.contextMenus.create({ id: 'linkforge-link', title: 'Send link to LinkForge', contexts: ['link'] });
+  chrome.contextMenus.create({ id: 'cypherlinks-page', title: 'Send page to CypherLinks', contexts: ['page'] });
+  chrome.contextMenus.create({ id: 'cypherlinks-link', title: 'Send link to CypherLinks', contexts: ['link'] });
 });
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {

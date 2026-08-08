@@ -853,5 +853,5 @@ pub fn run() {
             install_dependencies
         ])
         .run(tauri::generate_context!())
-        .expect("error while running LinkForge");
+        .expect("error while running CypherLinks");
 }

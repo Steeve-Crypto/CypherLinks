@@ -160,37 +160,37 @@ function App() {
   const [proxy, setProxy] = useState('');
   const [postAction, setPostAction] = useState('none');
   const [scheduledAt, setScheduledAt] = useState('');
-  const [filenameTemplate, setFilenameTemplate] = useState(() => localStorage.getItem('linkforge-filename-template') || defaultTemplate);
+  const [filenameTemplate, setFilenameTemplate] = useState(() => localStorage.getItem('cypherlinks-filename-template') || defaultTemplate);
   const [downloadDir, setDownloadDir] = useState('');
 
-  const [items, setItems] = useState<DownloadItem[]>(() => readJson('linkforge-history', []));
+  const [items, setItems] = useState<DownloadItem[]>(() => readJson('cypherlinks-history', []));
   const [previewItem, setPreviewItem] = useState<DownloadItem | null>(null);
-  const [sitePresets, setSitePresets] = useState<Record<string, SitePreset>>(() => readJson('linkforge-site-presets', {}));
+  const [sitePresets, setSitePresets] = useState<Record<string, SitePreset>>(() => readJson('cypherlinks-site-presets', {}));
 
-  const [watchClipboard, setWatchClipboard] = useState(() => localStorage.getItem('linkforge-watch-clipboard') === 'true');
+  const [watchClipboard, setWatchClipboard] = useState(() => localStorage.getItem('cypherlinks-watch-clipboard') === 'true');
   const [clipboardCandidate, setClipboardCandidate] = useState('');
-  const [maxConcurrent, setMaxConcurrent] = useState(() => Math.max(1, Math.min(6, Number(localStorage.getItem('linkforge-concurrency') || 2))));
+  const [maxConcurrent, setMaxConcurrent] = useState(() => Math.max(1, Math.min(6, Number(localStorage.getItem('cypherlinks-concurrency') || 2))));
   const [deps, setDeps] = useState<DependencyStatus | null>(null);
   const [toolMessage, setToolMessage] = useState('');
 
   useEffect(() => {
-    localStorage.setItem('linkforge-history', JSON.stringify(items.slice(0, 150)));
+    localStorage.setItem('cypherlinks-history', JSON.stringify(items.slice(0, 150)));
   }, [items]);
 
   useEffect(() => {
-    localStorage.setItem('linkforge-site-presets', JSON.stringify(sitePresets));
+    localStorage.setItem('cypherlinks-site-presets', JSON.stringify(sitePresets));
   }, [sitePresets]);
 
   useEffect(() => {
-    localStorage.setItem('linkforge-filename-template', filenameTemplate);
+    localStorage.setItem('cypherlinks-filename-template', filenameTemplate);
   }, [filenameTemplate]);
 
   useEffect(() => {
-    localStorage.setItem('linkforge-watch-clipboard', String(watchClipboard));
+    localStorage.setItem('cypherlinks-watch-clipboard', String(watchClipboard));
   }, [watchClipboard]);
 
   useEffect(() => {
-    localStorage.setItem('linkforge-concurrency', String(maxConcurrent));
+    localStorage.setItem('cypherlinks-concurrency', String(maxConcurrent));
     invoke('set_max_concurrent', { value: maxConcurrent }).catch(() => {});
   }, [maxConcurrent]);
 
@@ -365,7 +365,7 @@ function App() {
       cookiesBrowser: cookiesBrowser === 'none' ? null : cookiesBrowser,
       embedMetadata,
       embedThumbnail,
-      archivePath: `${downloadDir}/.linkforge-archive.txt`,
+      archivePath: `${downloadDir}/.cypherlinks-archive.txt`,
       filenameTemplate,
       priority,
       limitRate: bandwidthLimit.trim() || null,
@@ -490,9 +490,9 @@ function App() {
     <main className="app-shell">
       <header className="topbar">
         <div className="brand-lockup">
-          <div className="brand-mark">LF</div>
+          <div className="brand-mark">CL</div>
           <div>
-            <strong>LinkForge</strong>
+            <strong>CypherLinks</strong>
             <span>Local media workspace</span>
           </div>
         </div>
@@ -574,7 +574,7 @@ function App() {
               <div className="panel empty-media">
                 <div className="empty-icon"><Play size={22} /></div>
                 <h2>Analyze a media page</h2>
-                <p>LinkForge will inspect available formats before anything is downloaded.</p>
+                <p>CypherLinks will inspect available formats before anything is downloaded.</p>
               </div>
             )}
 
@@ -719,7 +719,7 @@ function App() {
 
       {activeTab === 'settings' && (
         <section className="settings-page">
-          <div className="settings-heading"><span className="kicker">SETTINGS</span><h1>Integrations & defaults</h1><p>Everything runs locally; these controls change how LinkForge interacts with your machine.</p></div>
+          <div className="settings-heading"><span className="kicker">SETTINGS</span><h1>Integrations & defaults</h1><p>Everything runs locally; these controls change how CypherLinks interacts with your machine.</p></div>
 
           <div className="settings-grid">
             <div className="panel settings-card">
@@ -732,7 +732,7 @@ function App() {
             <div className="panel settings-card">
               <div className="card-icon"><Globe size={18} /></div>
               <h2>Browser extension</h2>
-              <p>The included Chromium extension sends the current tab or context-menu link to LinkForge over localhost only.</p>
+              <p>The included Chromium extension sends the current tab or context-menu link to CypherLinks over localhost only.</p>
               <button className="secondary-button full" onClick={openExtensionFolder}><FolderOpen size={15} /> Open extension folder</button>
               <small>Chrome / Edge: Extensions → Developer mode → Load unpacked.</small>
             </div>
@@ -784,7 +784,7 @@ function App() {
         </div>
       )}
 
-      <footer className="app-footer">LinkForge does not bypass DRM or access controls. Use it only for media you own or have permission to download.</footer>
+      <footer className="app-footer">CypherLinks does not bypass DRM or access controls. Use it only for media you own or have permission to download.</footer>
     </main>
   );
 }
