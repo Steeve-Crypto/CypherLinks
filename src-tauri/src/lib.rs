@@ -12,10 +12,63 @@ use std::{
 };
 use tauri::{AppHandle, Emitter, State};
 use tokio::{
-    io::{AsyncBufReadExt, BufReader},
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
+    net::TcpListener,
     process::Command,
     sync::{mpsc, Mutex},
 };
+
+
+#[derive(Debug, Deserialize)]
+struct ExtensionLink {
+    url: String,
+}
+
+async fn start_extension_bridge(app: AppHandle) {
+    let listener = match TcpListener::bind("127.0.0.1:47653").await {
+        Ok(listener) => listener,
+        Err(_) => return,
+    };
+
+    loop {
+        let Ok((mut stream, _)) = listener.accept().await else { continue };
+        let app = app.clone();
+        tokio::spawn(async move {
+            let mut buffer = vec![0_u8; 16 * 1024];
+            let Ok(size) = stream.read(&mut buffer).await else { return };
+            if size == 0 { return; }
+            let request = String::from_utf8_lossy(&buffer[..size]);
+            let header_end = request.find("\r\n\r\n").unwrap_or(request.len());
+            let headers = &request[..header_end];
+
+            if headers.starts_with("OPTIONS ") {
+                let response = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nContent-Length: 0\r\n\r\n";
+                let _ = stream.write_all(response.as_bytes()).await;
+                return;
+            }
+
+            if !headers.starts_with("POST /add ") {
+                let response = "HTTP/1.1 404 Not Found\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: 0\r\n\r\n";
+                let _ = stream.write_all(response.as_bytes()).await;
+                return;
+            }
+
+            let body = request.get(header_end + 4..).unwrap_or("");
+            let link = serde_json::from_str::<ExtensionLink>(body).ok();
+            let valid = link.as_ref().map(|v| v.url.starts_with("http://") || v.url.starts_with("https://")).unwrap_or(false);
+            if let Some(link) = link.filter(|_| valid) {
+                let _ = app.emit("extension-url", serde_json::json!({ "url": link.url }));
+                let body = r#"{"ok":true}"#;
+                let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\n\r\n{}", body.len(), body);
+                let _ = stream.write_all(response.as_bytes()).await;
+            } else {
+                let body = r#"{"ok":false}"#;
+                let response = format!("HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\n\r\n{}", body.len(), body);
+                let _ = stream.write_all(response.as_bytes()).await;
+            }
+        });
+    }
+}
 
 #[derive(Default)]
 struct DownloadState {
@@ -419,6 +472,11 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(DownloadState::default())
+        .setup(|app| {
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(start_extension_bridge(handle));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             analyze_url,
             default_download_dir,

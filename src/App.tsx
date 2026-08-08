@@ -97,6 +97,11 @@ function App() {
   useEffect(() => {
     invoke<string>('default_download_dir').then(setDownloadDir).catch(() => {});
     invoke<{ytDlp:boolean; ffmpeg:boolean}>('dependency_status').then(setDeps).catch(() => {});
+    const extensionUnlisten = listen<{url: string}>('extension-url', ({ payload }) => {
+      setUrl(payload.url);
+      setInfo(null);
+      setError('Link received from browser extension. Analyze it when ready.');
+    });
     const unlisten = listen<ProgressEvent>('download-progress', ({ payload }) => {
       setItems((current) =>
         current.map((item) =>
@@ -116,6 +121,7 @@ function App() {
     });
     return () => {
       unlisten.then((fn) => fn());
+      extensionUnlisten.then((fn) => fn());
     };
   }, []);
 
