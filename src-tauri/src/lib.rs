@@ -1,5 +1,6 @@
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use serde_json::Value;
 use std::{
     collections::HashMap,
@@ -113,7 +114,7 @@ struct VideoInfo {
     formats: Vec<FormatInfo>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct DownloadRequest {
     id: String,
@@ -150,6 +151,115 @@ struct DownloadRequest {
     post_action: String,
     #[serde(default)]
     scheduled_at_ms: Option<u64>,
+    #[serde(default)]
+    checksum_sha256: Option<String>,
+    #[serde(default)]
+    provider: Option<String>,
+}
+
+
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+struct DownloadRule {
+    id: String,
+    host_pattern: String,
+    #[serde(default)] quality: Option<String>,
+    #[serde(default)] mode: Option<String>,
+    #[serde(default)] limit_rate: Option<String>,
+    #[serde(default)] priority: Option<i32>,
+    #[serde(default)] transcode_preset: Option<String>,
+    #[serde(default)] enabled: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeConfig {
+    #[serde(default)] rules: Vec<DownloadRule>,
+    #[serde(default)] domain_rate_limits: HashMap<String, String>,
+    #[serde(default)] provider_adapters: HashMap<String, Vec<String>>,
+    #[serde(default)] telemetry_enabled: bool,
+}
+
+fn app_data_root(app: &AppHandle) -> Result<PathBuf, String> {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            if parent.join("portable.flag").exists() {
+                let dir = parent.join("cypherlinks-data");
+                std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+                return Ok(dir);
+            }
+        }
+    }
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+fn config_path(app: &AppHandle) -> Result<PathBuf, String> { Ok(app_data_root(app)?.join("runtime-config.json")) }
+fn queue_path(app: &AppHandle) -> Result<PathBuf, String> { Ok(app_data_root(app)?.join("queue-state.json")) }
+fn telemetry_path(app: &AppHandle) -> Result<PathBuf, String> { Ok(app_data_root(app)?.join("telemetry.jsonl")) }
+
+fn load_runtime_config_file(app: &AppHandle) -> RuntimeConfig {
+    config_path(app).ok().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+}
+
+fn save_runtime_config_file(app: &AppHandle, config: &RuntimeConfig) -> Result<(), String> {
+    let path = config_path(app)?;
+    std::fs::write(path, serde_json::to_vec_pretty(config).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+}
+
+async fn persist_queue(app: &AppHandle, state: &DownloadState) -> Result<(), String> {
+    let queue = state.queue.lock().await.clone();
+    std::fs::write(queue_path(app)?, serde_json::to_vec_pretty(&queue).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+}
+
+fn host_from_url(url: &str) -> String {
+    url.split("://").nth(1).unwrap_or(url).split('/').next().unwrap_or("").split(':').next().unwrap_or("").trim_start_matches("www.").to_ascii_lowercase()
+}
+
+fn host_matches(host: &str, pattern: &str) -> bool {
+    let p = pattern.trim().trim_start_matches("*.").to_ascii_lowercase();
+    !p.is_empty() && (host == p || host.ends_with(&format!(".{p}")))
+}
+
+fn apply_runtime_rules(app: &AppHandle, mut request: DownloadRequest) -> DownloadRequest {
+    let config = load_runtime_config_file(app);
+    let host = host_from_url(&request.url);
+    if request.limit_rate.as_deref().unwrap_or("").is_empty() {
+        if let Some(rate) = config.domain_rate_limits.get(&host) { request.limit_rate = Some(rate.clone()); }
+    }
+    for rule in config.rules.iter().filter(|r| r.enabled && host_matches(&host, &r.host_pattern)) {
+        if let Some(v) = &rule.quality { request.quality = v.clone(); }
+        if let Some(v) = &rule.mode { request.mode = v.clone(); }
+        if let Some(v) = &rule.limit_rate { request.limit_rate = Some(v.clone()); }
+        if let Some(v) = rule.priority { request.priority = v.clamp(-10, 10); }
+        if let Some(v) = &rule.transcode_preset { request.transcode_preset = v.clone(); }
+    }
+    if request.provider.is_none() {
+        request.provider = config.provider_adapters.keys().find(|pattern| host_matches(&host, pattern)).cloned();
+    }
+    request
+}
+
+fn record_telemetry(app: &AppHandle, event: &str) {
+    let config = load_runtime_config_file(app);
+    if !config.telemetry_enabled { return; }
+    let Ok(path) = telemetry_path(app) else { return; };
+    use std::io::Write as _;
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let entry = serde_json::json!({"event": event, "timestampMs": unix_time_ms(), "version": env!("CARGO_PKG_VERSION")});
+        let _ = writeln!(file, "{}", entry);
+    }
+}
+
+fn sha256_file(path: &Path) -> Result<String, String> {
+    use std::io::Read as _;
+    let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 1024 * 1024];
+    loop { let n = file.read(&mut buffer).map_err(|e| e.to_string())?; if n == 0 { break; } hasher.update(&buffer[..n]); }
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 fn default_duplicate_policy() -> String { "skip".into() }
@@ -571,6 +681,10 @@ async fn run_download(app: AppHandle, request: DownloadRequest, cancel: Arc<Atom
         }
     }
     args.extend(["--continue".into(), "--retries".into(), "10".into(), "--fragment-retries".into(), "10".into()]);
+    if let Some(provider) = request.provider.as_ref() {
+        let config = load_runtime_config_file(&app);
+        if let Some(extra) = config.provider_adapters.get(provider) { args.extend(extra.clone()); }
+    }
 
     args.push(request.url.clone());
 
@@ -664,9 +778,16 @@ async fn run_download(app: AppHandle, request: DownloadRequest, cancel: Arc<Atom
                             });
                         }
                     }
+                    if let (Some(expected), Some(path)) = (request.checksum_sha256.as_deref(), final_name.as_deref()) {
+                        let actual = sha256_file(Path::new(path))?;
+                        if !expected.trim().eq_ignore_ascii_case(&actual) {
+                            return Err(format!("SHA-256 verification failed. Expected {}, got {}", expected.trim(), actual));
+                        }
+                    }
+                    record_telemetry(&app, "download_completed");
                     emit(&app, ProgressPayload {
                         id: request.id.clone(), status: "finished".into(), percent: Some(100.0),
-                        speed: None, eta: None, filename: final_name, message: Some("Saved successfully".into()),
+                        speed: None, eta: None, filename: final_name, message: Some("Saved and verified successfully".into()),
                     });
                     return Ok(());
                 }
@@ -746,12 +867,15 @@ async fn start_download(
     request: DownloadRequest,
     state: State<'_, DownloadState>,
 ) -> Result<(), String> {
+    let request = apply_runtime_rules(&app, request);
     let scheduled = request.scheduled_at_ms.map(|value| value > unix_time_ms()).unwrap_or(false);
     emit(&app, ProgressPayload {
         id: request.id.clone(), status: if scheduled { "scheduled".into() } else { "queued".into() }, percent: Some(0.0),
         speed: None, eta: None, filename: None, message: Some(if scheduled { "Scheduled".into() } else { "Waiting in queue".into() }),
     });
     state.queue.lock().await.push(request);
+    persist_queue(&app, state.inner()).await?;
+    record_telemetry(&app, "download_queued");
     schedule_queue_pump(app, state.inner().clone());
     Ok(())
 }
@@ -876,6 +1000,54 @@ fn dependency_status() -> serde_json::Value {
     })
 }
 
+
+#[tauri::command]
+fn load_runtime_config(app: AppHandle) -> RuntimeConfig { load_runtime_config_file(&app) }
+
+#[tauri::command]
+fn save_runtime_config(app: AppHandle, config: RuntimeConfig) -> Result<(), String> { save_runtime_config_file(&app, &config) }
+
+#[tauri::command]
+fn export_runtime_config(app: AppHandle, destination: String) -> Result<String, String> {
+    let source = config_path(&app)?; if !source.exists() { save_runtime_config_file(&app, &RuntimeConfig::default())?; }
+    std::fs::copy(source, &destination).map_err(|e| e.to_string())?; Ok(destination)
+}
+
+#[tauri::command]
+fn import_runtime_config(app: AppHandle, source: String) -> Result<RuntimeConfig, String> {
+    let raw = std::fs::read_to_string(&source).map_err(|e| e.to_string())?;
+    let config: RuntimeConfig = serde_json::from_str(&raw).map_err(|e| format!("Invalid CypherLinks settings file: {e}"))?;
+    save_runtime_config_file(&app, &config)?; Ok(config)
+}
+
+#[tauri::command]
+fn portable_mode_status(app: AppHandle) -> Result<serde_json::Value, String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let marker = exe.parent().unwrap_or(Path::new(".")).join("portable.flag");
+    Ok(serde_json::json!({"enabled": marker.exists(), "dataPath": app_data_root(&app)?.to_string_lossy()}))
+}
+
+#[tauri::command]
+fn set_portable_mode(enabled: bool) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let marker = exe.parent().unwrap_or(Path::new(".")).join("portable.flag");
+    if enabled { std::fs::write(marker, b"CypherLinks portable mode
+").map_err(|e| e.to_string())?; }
+    else if marker.exists() { std::fs::remove_file(marker).map_err(|e| e.to_string())?; }
+    Ok(())
+}
+
+#[tauri::command]
+fn telemetry_summary(app: AppHandle) -> Result<serde_json::Value, String> {
+    let path = telemetry_path(&app)?; let raw = std::fs::read_to_string(path).unwrap_or_default();
+    let mut counts: HashMap<String,u64> = HashMap::new();
+    for line in raw.lines() { if let Ok(v)=serde_json::from_str::<Value>(line) { if let Some(e)=v.get("event").and_then(Value::as_str) { *counts.entry(e.to_string()).or_insert(0)+=1; } } }
+    Ok(serde_json::json!({"events": counts, "localOnly": true}))
+}
+
+#[tauri::command]
+fn compute_sha256(path: String) -> Result<String, String> { sha256_file(Path::new(&path)) }
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -885,7 +1057,16 @@ pub fn run() {
         .manage(DownloadState::default())
         .setup(|app| {
             let handle = app.handle().clone();
-            tauri::async_runtime::spawn(start_extension_bridge(handle));
+            let state = app.state::<DownloadState>().inner().clone();
+            if let Ok(path) = queue_path(&handle) {
+                if let Ok(raw) = std::fs::read_to_string(path) {
+                    if let Ok(restored) = serde_json::from_str::<Vec<DownloadRequest>>(&raw) {
+                        let state_clone = state.clone();
+                        tauri::async_runtime::spawn(async move { *state_clone.queue.lock().await = restored; schedule_queue_pump(handle.clone(), state_clone); });
+                    }
+                }
+            }
+            tauri::async_runtime::spawn(start_extension_bridge(app.handle().clone()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -902,7 +1083,15 @@ pub fn run() {
             install_dependencies,
             ingest_dropped_paths,
             report_error,
-            open_diagnostics_folder
+            open_diagnostics_folder,
+            load_runtime_config,
+            save_runtime_config,
+            export_runtime_config,
+            import_runtime_config,
+            portable_mode_status,
+            set_portable_mode,
+            telemetry_summary,
+            compute_sha256
         ])
         .run(tauri::generate_context!())
         .expect("error while running CypherLinks");
