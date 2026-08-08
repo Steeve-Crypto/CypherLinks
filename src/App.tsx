@@ -58,6 +58,7 @@ type SitePreset = {
   embedThumbnail: boolean;
   filenameTemplate: string;
   bandwidthLimit?: string;
+  splitChapters?: boolean;
 };
 
 type DownloadItem = {
@@ -112,6 +113,7 @@ function App() {
   const [bandwidthLimit, setBandwidthLimit] = useState('');
   const [proxy, setProxy] = useState('');
   const [duplicatePolicy, setDuplicatePolicy] = useState<'skip' | 'keep' | 'overwrite'>('skip');
+  const [splitChapters, setSplitChapters] = useState(false);
   const [watchClipboard, setWatchClipboard] = useState(() => localStorage.getItem('linkforge-watch-clipboard') === 'true');
   const [clipboardCandidate, setClipboardCandidate] = useState('');
 
@@ -189,13 +191,14 @@ function App() {
     setEmbedThumbnail(preset.embedThumbnail);
     setFilenameTemplate(preset.filenameTemplate);
     setBandwidthLimit(preset.bandwidthLimit || '');
+    setSplitChapters(Boolean(preset.splitChapters));
     setPresetMessage(`Applied ${host} preset`);
   }
 
   function saveSitePreset() {
     const host = hostnameFor(url);
     if (!host) return;
-    setSitePresets((current) => ({ ...current, [host]: { mode, quality, subtitles, playlist, embedMetadata, embedThumbnail, filenameTemplate, bandwidthLimit } }));
+    setSitePresets((current) => ({ ...current, [host]: { mode, quality, subtitles, playlist, embedMetadata, embedThumbnail, filenameTemplate, bandwidthLimit, splitChapters } }));
     setPresetMessage(`Saved preset for ${host}`);
   }
 
@@ -240,7 +243,7 @@ function App() {
     };
     setItems((current) => [item, ...current]);
     try {
-      const request = { id, url: item.url, outputDir: downloadDir, mode, quality, subtitles, playlist, cookiesBrowser: cookiesBrowser === 'none' ? null : cookiesBrowser, embedMetadata, embedThumbnail, archivePath: `${downloadDir}/.linkforge-archive.txt`, filenameTemplate, priority, limitRate: bandwidthLimit || null, proxy: proxy || null, duplicatePolicy };
+      const request = { id, url: item.url, outputDir: downloadDir, mode, quality, subtitles, playlist, cookiesBrowser: cookiesBrowser === 'none' ? null : cookiesBrowser, embedMetadata, embedThumbnail, archivePath: `${downloadDir}/.linkforge-archive.txt`, filenameTemplate, priority, limitRate: bandwidthLimit || null, proxy: proxy || null, duplicatePolicy, splitChapters };
       const delay = scheduledAt ? Math.max(0, new Date(scheduledAt).getTime() - Date.now()) : 0;
       if (delay > 0) {
         setItems((current) => current.map((entry) => entry.id === id ? { ...entry, message: `Scheduled for ${new Date(scheduledAt).toLocaleString()}` } : entry));
@@ -265,7 +268,7 @@ function App() {
         const meta = await invoke<VideoInfo>('analyze_url', { url: batchUrl });
         const id = crypto.randomUUID();
         setItems((current) => [{ id, url: batchUrl, title: meta.title, mode, quality, progress: 0, status: 'queued', sourceId: meta.id }, ...current]);
-        await invoke('start_download', { request: { id, url: batchUrl, outputDir: downloadDir, mode, quality, subtitles, playlist, cookiesBrowser: cookiesBrowser === 'none' ? null : cookiesBrowser, embedMetadata, embedThumbnail, archivePath: `${downloadDir}/.linkforge-archive.txt`, filenameTemplate, priority, limitRate: bandwidthLimit || null, proxy: proxy || null, duplicatePolicy } });
+        await invoke('start_download', { request: { id, url: batchUrl, outputDir: downloadDir, mode, quality, subtitles, playlist, cookiesBrowser: cookiesBrowser === 'none' ? null : cookiesBrowser, embedMetadata, embedThumbnail, archivePath: `${downloadDir}/.linkforge-archive.txt`, filenameTemplate, priority, limitRate: bandwidthLimit || null, proxy: proxy || null, duplicatePolicy, splitChapters } });
       } catch (e) { setError(String(e)); }
     }
   }
@@ -353,6 +356,7 @@ function App() {
               <label className="checkbox-row"><input type="checkbox" checked={playlist} onChange={(e) => setPlaylist(e.target.checked)} /><span>Download playlist/channel links</span></label>
               <label className="checkbox-row"><input type="checkbox" checked={embedMetadata} onChange={(e) => setEmbedMetadata(e.target.checked)} /><span>Embed media metadata</span></label>
               <label className="checkbox-row"><input type="checkbox" checked={embedThumbnail} onChange={(e) => setEmbedThumbnail(e.target.checked)} /><span>Embed thumbnail</span></label>
+              <label className="checkbox-row"><input type="checkbox" checked={splitChapters} onChange={(e) => setSplitChapters(e.target.checked)} /><span>Split chapters into separate files</span></label>
               <label className="control-group"><span>Browser cookies</span><select value={cookiesBrowser} onChange={(e) => setCookiesBrowser(e.target.value)}><option value="none">None</option><option value="chrome">Chrome</option><option value="firefox">Firefox</option><option value="edge">Edge</option><option value="safari">Safari</option></select></label>
               <label className="control-group" style={{gridColumn:'1 / -1'}}><span>Filename template</span><input value={filenameTemplate} onChange={(e) => setFilenameTemplate(e.target.value)} placeholder="%(title)s [%(id)s].%(ext)s" /></label>
               <label className="control-group"><span>Queue priority</span><select value={priority} onChange={(e) => setPriority(Number(e.target.value))}><option value={10}>High</option><option value={0}>Normal</option><option value={-10}>Low</option></select></label>

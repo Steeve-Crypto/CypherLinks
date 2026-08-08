@@ -141,6 +141,8 @@ struct DownloadRequest {
     proxy: Option<String>,
     #[serde(default = "default_duplicate_policy")]
     duplicate_policy: String,
+    #[serde(default)]
+    split_chapters: bool,
 }
 
 fn default_duplicate_policy() -> String { "skip".into() }
@@ -385,6 +387,10 @@ async fn run_download(app: AppHandle, request: DownloadRequest, cancel: Arc<Atom
     }
     if request.embed_thumbnail {
         args.push("--embed-thumbnail".into());
+    }
+
+    if request.split_chapters {
+        args.extend(["--split-chapters".into(), "--force-keyframes-at-cuts".into()]);
     }
 
     if request.subtitles {
