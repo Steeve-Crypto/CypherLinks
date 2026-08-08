@@ -841,6 +841,7 @@ async fn pump_queue(app: AppHandle, state: DownloadState) {
             }
         };
 
+        if next.is_some() { let _ = persist_queue(&app, &state).await; }
         let Some(request) = next else {
             if let Some(wait) = wait_ms {
                 let delayed_app = app.clone();
