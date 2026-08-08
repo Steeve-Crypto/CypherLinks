@@ -1,20 +1,75 @@
 # LinkForge
 
-A local-first desktop media downloader built with Tauri 2, React, TypeScript, Rust, yt-dlp, and FFmpeg.
+LinkForge is a local-first desktop media downloader built with **Tauri 2, React, TypeScript, Rust, yt-dlp, and FFmpeg**. It is designed for media you own, public-domain/permitted media, or content you otherwise have authorization to download. It does not contain DRM or access-control bypass logic.
 
-## What works
+## Current feature set
 
-- Analyze a supported media URL before downloading
-- Shows title, uploader, duration, thumbnail, and available resolutions
-- Video mode with Best / 2160p / 1440p / 1080p / 720p / 480p / 360p choices
-- Audio-only MP3 extraction
-- Optional English subtitles / auto-subs when available
-- Native folder picker
-- Live progress, speed, ETA, post-processing state, success/error state
-- Multiple concurrent downloads
-- Real cancellation of active downloads
-- Local output only; no server or account required
-- No DRM/access-control bypass logic
+### Download workspace
+
+- Analyze supported media URLs before downloading
+- Video and audio-only output modes
+- Best / 2160p / 1440p / 1080p / 720p / 480p / 360p selection
+- Playlist and channel downloads
+- Batch URL queueing
+- English subtitles and auto-caption downloads
+- Browser-cookie support for content you are authorized to access
+- Metadata and thumbnail embedding
+- Custom yt-dlp filename templates
+- Native destination-folder picker
+- Scheduled downloads handled by the Rust queue
+- Queue priority: High / Normal / Low
+- Bandwidth limiting such as `500K`, `5M`, or `1.5G`
+- Optional HTTP/HTTPS/SOCKS proxy routing
+- Duplicate policy: skip known media, keep both, or overwrite
+- Automatic chapter splitting
+- Download retry/resume behavior
+- Post-download actions: open destination folder or open finished media
+
+### Transcoding presets
+
+FFmpeg can create an additional optimized version after the source download finishes:
+
+- **Phone** — H.264/AAC MP4 capped around 720p
+- **Desktop** — higher-quality H.264/AAC MP4
+- **Archive** — high-quality MKV output
+- **Audio Library** — AAC 256 kbps M4A
+- **Keep source** — no additional transcoding
+
+### Queue and history
+
+- Priority-aware native Rust queue
+- Configurable 1–6 concurrent downloads
+- Reprioritize queued/scheduled jobs after they are added
+- Live progress, speed, ETA, processing state, completion, and errors
+- Real cancellation for queued and active jobs
+- Local history persisted in the desktop frontend
+- Duplicate awareness for previously completed media
+- Built-in local video/audio preview player
+
+### Clipboard integration
+
+Enable **Settings → Clipboard detection**. LinkForge polls the local system clipboard and offers newly copied HTTP/HTTPS links in the Download workspace. It does not automatically download clipboard contents.
+
+### Browser extension
+
+The `browser-extension/` directory contains a Manifest V3 Chromium extension. It sends the current tab or a context-menu link to LinkForge through a localhost-only bridge at `127.0.0.1:47653`.
+
+To install it in Chrome or Edge:
+
+1. Run LinkForge.
+2. Open **Settings → Browser extension → Open extension folder**.
+3. Open the browser's Extensions page.
+4. Enable **Developer mode**.
+5. Choose **Load unpacked**.
+6. Select the `browser-extension` directory.
+
+You can then click the LinkForge extension button or right-click a page/link and choose **Send … to LinkForge**.
+
+### Per-site presets
+
+After configuring a download profile for a URL, click **Save site preset**. LinkForge stores the profile against the hostname and automatically reapplies it the next time that site is analyzed. Saved presets can be applied or deleted from **Settings → Site presets**.
+
+Proxy values are intentionally not stored inside site presets.
 
 ## Prerequisites
 
@@ -24,16 +79,17 @@ You need:
 2. Rust stable toolchain
 3. yt-dlp
 4. FFmpeg
-5. Tauri's OS build prerequisites
+5. Tauri's platform build prerequisites
 
-### macOS
+### Windows
 
-```bash
-xcode-select --install
-brew install node rust yt-dlp ffmpeg
+Run the included PowerShell helper:
+
+```powershell
+./setup-windows.ps1
 ```
 
-### Windows (PowerShell)
+Or install manually:
 
 ```powershell
 winget install OpenJS.NodeJS.LTS
@@ -42,7 +98,20 @@ winget install yt-dlp.yt-dlp
 winget install Gyan.FFmpeg
 ```
 
-Install Microsoft C++ Build Tools if Tauri prompts for them.
+Install Microsoft C++ Build Tools if Tauri requests them.
+
+### macOS
+
+```bash
+./setup-macos.sh
+```
+
+Or:
+
+```bash
+xcode-select --install
+brew install node rust yt-dlp ffmpeg
+```
 
 ### Debian / Ubuntu
 
@@ -60,13 +129,17 @@ npm install
 npm run tauri dev
 ```
 
-## Build a desktop installer
+## Build desktop installers
 
 ```bash
 npm run tauri build
 ```
 
-Tauri will place platform-specific bundles under `src-tauri/target/release/bundle/`.
+Tauri writes platform-specific bundles under:
+
+```text
+src-tauri/target/release/bundle/
+```
 
 ## Architecture
 
@@ -75,18 +148,43 @@ React + TypeScript UI
         │
         │ Tauri commands + events
         ▼
-Rust process manager
-  ├── URL validation / metadata normalization
-  ├── async download lifecycle
-  ├── cancellation flags
-  └── progress streaming
+Rust desktop backend
+  ├── metadata analysis
+  ├── priority / scheduling queue
+  ├── cancellation and progress events
+  ├── clipboard integration
+  ├── localhost extension bridge
+  ├── local file actions
+  └── dependency management
         │
         ├── yt-dlp
+        │    ├── extraction / formats
+        │    ├── playlists / channels
+        │    ├── subtitles / metadata
+        │    ├── cookies / proxy
+        │    └── retry / resume / archive
+        │
         └── FFmpeg
+             ├── stream merging
+             ├── audio extraction
+             ├── chapter splitting
+             └── transcoding presets
 ```
 
-`yt-dlp` is invoked as an external process. LinkForge first looks for a `yt-dlp` executable on PATH and otherwise tries `python -m yt_dlp`.
+## Main project directories
+
+```text
+src/                    React / TypeScript frontend
+src-tauri/              Rust / Tauri desktop backend
+browser-extension/      Chromium extension
+setup-windows.ps1       Windows dependency helper
+setup-macos.sh           macOS dependency helper
+```
+
+## Validation notes
+
+The frontend TypeScript/TSX syntax and JSON configuration files can be validated without platform dependencies. A full Tauri native build additionally requires the Rust toolchain and the platform-specific system libraries listed above.
 
 ## Usage note
 
-Use LinkForge only for media you own, public-domain/permitted media, or content you otherwise have authorization to download. It intentionally contains no code for bypassing DRM, paywalls, authentication, or other access controls.
+Use LinkForge only for media you own, public-domain/permitted media, or content you otherwise have authorization to download. LinkForge intentionally does not implement DRM, paywall, or access-control bypassing.
