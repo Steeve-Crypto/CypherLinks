@@ -47,6 +47,17 @@ type ProgressEvent = {
   message?: string;
 };
 
+
+type SitePreset = {
+  mode: 'video' | 'audio';
+  quality: string;
+  subtitles: boolean;
+  playlist: boolean;
+  embedMetadata: boolean;
+  embedThumbnail: boolean;
+  filenameTemplate: string;
+};
+
 type DownloadItem = {
   id: string;
   url: string;
@@ -92,12 +103,15 @@ function App() {
   const [filenameTemplate, setFilenameTemplate] = useState(() => localStorage.getItem('linkforge-filename-template') || '%(title).180B [%(id)s].%(ext)s');
   const [deps, setDeps] = useState<{ytDlp:boolean; ffmpeg:boolean} | null>(null);
   const [updateMessage, setUpdateMessage] = useState('');
+  const [sitePresets, setSitePresets] = useState<Record<string, SitePreset>>(() => { try { return JSON.parse(localStorage.getItem('linkforge-site-presets') || '{}'); } catch { return {}; } });
+  const [presetMessage, setPresetMessage] = useState('');
   const [watchClipboard, setWatchClipboard] = useState(() => localStorage.getItem('linkforge-watch-clipboard') === 'true');
   const [clipboardCandidate, setClipboardCandidate] = useState('');
 
   useEffect(() => { localStorage.setItem('linkforge-history', JSON.stringify(items.slice(0, 100))); }, [items]);
   useEffect(() => { localStorage.setItem('linkforge-watch-clipboard', String(watchClipboard)); }, [watchClipboard]);
   useEffect(() => { localStorage.setItem('linkforge-filename-template', filenameTemplate); }, [filenameTemplate]);
+  useEffect(() => { localStorage.setItem('linkforge-site-presets', JSON.stringify(sitePresets)); }, [sitePresets]);
 
   useEffect(() => {
     if (!watchClipboard) return;
@@ -150,9 +164,36 @@ function App() {
     return new Set(info.formats.map((f) => f.height).filter((h): h is number => Boolean(h)));
   }, [info]);
 
+
+  function hostnameFor(value: string) {
+    try { return new URL(value).hostname.replace(/^www\./, ''); } catch { return ''; }
+  }
+
+  function applySitePreset(value: string) {
+    const host = hostnameFor(value);
+    const preset = host ? sitePresets[host] : undefined;
+    if (!preset) return;
+    setMode(preset.mode);
+    setQuality(preset.quality);
+    setSubtitles(preset.subtitles);
+    setPlaylist(preset.playlist);
+    setEmbedMetadata(preset.embedMetadata);
+    setEmbedThumbnail(preset.embedThumbnail);
+    setFilenameTemplate(preset.filenameTemplate);
+    setPresetMessage(`Applied ${host} preset`);
+  }
+
+  function saveSitePreset() {
+    const host = hostnameFor(url);
+    if (!host) return;
+    setSitePresets((current) => ({ ...current, [host]: { mode, quality, subtitles, playlist, embedMetadata, embedThumbnail, filenameTemplate } }));
+    setPresetMessage(`Saved preset for ${host}`);
+  }
+
   async function analyze() {
     const trimmed = url.trim();
     if (!trimmed) return;
+    applySitePreset(trimmed);
     setLoading(true);
     setError('');
     setInfo(null);
@@ -305,6 +346,7 @@ function App() {
               <label className="control-group" style={{gridColumn:'1 / -1'}}><span>Filename template</span><input value={filenameTemplate} onChange={(e) => setFilenameTemplate(e.target.value)} placeholder="%(title)s [%(id)s].%(ext)s" /></label>
             </div>
 
+            <div style={{display:'flex', gap:8, alignItems:'center', marginBottom:10}}><button className="ghost" onClick={saveSitePreset}>Save site preset</button>{presetMessage && <span className="download-meta">{presetMessage}</span>}</div>
             <div className="download-actions">
               <input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} title="Schedule download" />
               <button className="folder-button" onClick={chooseFolder}><FolderOpen size={16} /> {downloadDir || 'Choose folder'}</button>
