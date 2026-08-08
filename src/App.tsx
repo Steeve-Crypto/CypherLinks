@@ -624,10 +624,16 @@ function App() {
                 </div>
               )}
 
-              {error && <div className="error-banner"><AlertCircle size={16} /> {error}</div>}
+              {error && <div className="error-banner"><AlertCircle size={16} /><span>{error}</span><button onClick={() => analyze()} disabled={!url.trim()}>Retry</button><button onClick={() => { invoke('report_error', { source: 'interface', message: error, details: url }).catch(() => {}); setNotice('Diagnostic report saved locally.'); }}>Save diagnostic</button></div>}
             </div>
 
-            {info ? (
+            {loading ? (
+              <div className="panel media-panel loading-card" aria-live="polite">
+                <div className="skeleton skeleton-thumb" />
+                <div className="skeleton-copy"><div className="skeleton line short" /><div className="skeleton line wide" /><div className="skeleton line medium" /></div>
+                <span className="loading-label"><Loader2 className="spin" size={15} /> Inspecting formats and metadata…</span>
+              </div>
+            ) : info ? (
               <div className="panel media-panel">
                 <div className="media-hero">
                   <div className="thumbnail-wrap">
@@ -650,7 +656,7 @@ function App() {
               <div className="panel empty-media">
                 <div className="empty-icon"><Play size={22} /></div>
                 <h2>Analyze a media page</h2>
-                <p>CypherLinks will inspect available formats before anything is downloaded.</p>
+                <p>CypherLinks will inspect available formats before anything is downloaded.</p><div className="drop-hint">Drop a link, .txt/.url file, or local media anywhere in this window.</div>
               </div>
             )}
 
