@@ -45,6 +45,7 @@ type ProgressEvent = {
   eta?: string;
   filename?: string;
   message?: string;
+  sourceId?: string;
 };
 
 
@@ -110,6 +111,7 @@ function App() {
   const [maxConcurrent, setMaxConcurrent] = useState(() => Number(localStorage.getItem('linkforge-concurrency') || 2));
   const [bandwidthLimit, setBandwidthLimit] = useState('');
   const [proxy, setProxy] = useState('');
+  const [duplicatePolicy, setDuplicatePolicy] = useState<'skip' | 'keep' | 'overwrite'>('skip');
   const [watchClipboard, setWatchClipboard] = useState(() => localStorage.getItem('linkforge-watch-clipboard') === 'true');
   const [clipboardCandidate, setClipboardCandidate] = useState('');
 
@@ -234,10 +236,11 @@ function App() {
       quality,
       progress: 0,
       status: 'queued',
+      sourceId: info.id,
     };
     setItems((current) => [item, ...current]);
     try {
-      const request = { id, url: item.url, outputDir: downloadDir, mode, quality, subtitles, playlist, cookiesBrowser: cookiesBrowser === 'none' ? null : cookiesBrowser, embedMetadata, embedThumbnail, archivePath: `${downloadDir}/.linkforge-archive.txt`, filenameTemplate, priority, limitRate: bandwidthLimit || null, proxy: proxy || null };
+      const request = { id, url: item.url, outputDir: downloadDir, mode, quality, subtitles, playlist, cookiesBrowser: cookiesBrowser === 'none' ? null : cookiesBrowser, embedMetadata, embedThumbnail, archivePath: `${downloadDir}/.linkforge-archive.txt`, filenameTemplate, priority, limitRate: bandwidthLimit || null, proxy: proxy || null, duplicatePolicy };
       const delay = scheduledAt ? Math.max(0, new Date(scheduledAt).getTime() - Date.now()) : 0;
       if (delay > 0) {
         setItems((current) => current.map((entry) => entry.id === id ? { ...entry, message: `Scheduled for ${new Date(scheduledAt).toLocaleString()}` } : entry));
@@ -261,8 +264,8 @@ function App() {
       try {
         const meta = await invoke<VideoInfo>('analyze_url', { url: batchUrl });
         const id = crypto.randomUUID();
-        setItems((current) => [{ id, url: batchUrl, title: meta.title, mode, quality, progress: 0, status: 'queued' }, ...current]);
-        await invoke('start_download', { request: { id, url: batchUrl, outputDir: downloadDir, mode, quality, subtitles, playlist, cookiesBrowser: cookiesBrowser === 'none' ? null : cookiesBrowser, embedMetadata, embedThumbnail, archivePath: `${downloadDir}/.linkforge-archive.txt`, filenameTemplate, priority, limitRate: bandwidthLimit || null, proxy: proxy || null } });
+        setItems((current) => [{ id, url: batchUrl, title: meta.title, mode, quality, progress: 0, status: 'queued', sourceId: meta.id }, ...current]);
+        await invoke('start_download', { request: { id, url: batchUrl, outputDir: downloadDir, mode, quality, subtitles, playlist, cookiesBrowser: cookiesBrowser === 'none' ? null : cookiesBrowser, embedMetadata, embedThumbnail, archivePath: `${downloadDir}/.linkforge-archive.txt`, filenameTemplate, priority, limitRate: bandwidthLimit || null, proxy: proxy || null, duplicatePolicy } });
       } catch (e) { setError(String(e)); }
     }
   }
@@ -318,6 +321,7 @@ function App() {
               <p className="eyebrow">READY</p>
               <h2>{info.title}</h2>
               <p>{info.uploader || 'Unknown uploader'}</p>
+              {items.some((item) => item.sourceId === info.id && item.status === 'finished') && <p style={{marginTop:8}}>Previously downloaded · duplicate policy will apply</p>}
             </div>
 
             <div className="controls-grid">
@@ -355,6 +359,7 @@ function App() {
               <label className="control-group"><span>Concurrent downloads</span><select value={maxConcurrent} onChange={(e) => setMaxConcurrent(Number(e.target.value))}>{[1,2,3,4,5,6].map((value) => <option value={value} key={value}>{value}</option>)}</select></label>
               <label className="control-group"><span>Bandwidth limit</span><input value={bandwidthLimit} onChange={(e) => setBandwidthLimit(e.target.value)} placeholder="Unlimited or 5M" /></label>
               <label className="control-group" style={{gridColumn:'1 / -1'}}><span>Proxy</span><input value={proxy} onChange={(e) => setProxy(e.target.value)} placeholder="socks5://127.0.0.1:1080 (optional)" /></label>
+              <label className="control-group"><span>If already downloaded</span><select value={duplicatePolicy} onChange={(e) => setDuplicatePolicy(e.target.value as typeof duplicatePolicy)}><option value="skip">Skip duplicate</option><option value="keep">Keep both</option><option value="overwrite">Overwrite file</option></select></label>
             </div>
 
             <div style={{display:'flex', gap:8, alignItems:'center', marginBottom:10}}><button className="ghost" onClick={saveSitePreset}>Save site preset</button>{presetMessage && <span className="download-meta">{presetMessage}</span>}</div>

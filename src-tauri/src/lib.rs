@@ -139,7 +139,11 @@ struct DownloadRequest {
     limit_rate: Option<String>,
     #[serde(default)]
     proxy: Option<String>,
+    #[serde(default = "default_duplicate_policy")]
+    duplicate_policy: String,
 }
+
+fn default_duplicate_policy() -> String { "skip".into() }
 
 #[derive(Debug, Serialize, Clone)]
 struct ProgressPayload {
@@ -307,11 +311,18 @@ async fn run_download(app: AppHandle, request: DownloadRequest, cancel: Arc<Atom
     if requested_template.is_empty() || requested_template.len() > 220 || requested_template.contains("..") || requested_template.contains('/') || requested_template.contains('\\') {
         return Err("Filename template must be a simple filename under 220 characters.".into());
     }
-    let output_template = if requested_template.contains("%(ext)s") {
+    let mut output_template = if requested_template.contains("%(ext)s") {
         requested_template.to_string()
     } else {
         format!("{requested_template}.%(ext)s")
     };
+    if request.duplicate_policy == "keep" {
+        output_template = if let Some(stem) = output_template.strip_suffix(".%(ext)s") {
+            format!("{stem} [%(epoch)s].%(ext)s")
+        } else {
+            format!("{output_template} [%(epoch)s]")
+        };
+    }
 
     args.extend([
         "--newline".into(),
@@ -385,8 +396,15 @@ async fn run_download(app: AppHandle, request: DownloadRequest, cancel: Arc<Atom
         ]);
     }
 
-    if let Some(archive) = request.archive_path.as_ref().filter(|v| !v.is_empty()) {
-        args.extend(["--download-archive".into(), archive.clone()]);
+    match request.duplicate_policy.as_str() {
+        "overwrite" => args.push("--force-overwrites".into()),
+        "keep" => {},
+        _ => {
+            args.push("--no-overwrites".into());
+            if let Some(archive) = request.archive_path.as_ref().filter(|v| !v.is_empty()) {
+                args.extend(["--download-archive".into(), archive.clone()]);
+            }
+        }
     }
     args.extend(["--continue".into(), "--retries".into(), "10".into(), "--fragment-retries".into(), "10".into()]);
 
