@@ -43,6 +43,7 @@
       "../browser-extension/popup.js": "browser-extension/popup.js",
       "../browser-extension/popup.css": "browser-extension/popup.css"
     },
-    "icon": []
+    "icon": [],
+    "createUpdaterArtifacts": true
   }
 }

@@ -1,0 +1,11 @@
+{
+  "plugins": {
+    "updater": {
+      "pubkey": "CYPHERLINKS_PUBLIC_KEY",
+      "endpoints": [
+        "https://releases.example.com/cypherlinks/{{target}}/{{arch}}/{{current_version}}"
+      ],
+      "windows": { "installMode": "passive" }
+    }
+  }
+}

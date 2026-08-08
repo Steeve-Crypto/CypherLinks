@@ -21,3 +21,6 @@ tokio = { version = "1", features = ["process", "io-util", "sync", "time", "macr
 regex = "1"
 dirs = "6"
 which = "8"
+
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
