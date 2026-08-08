@@ -21,14 +21,28 @@
       }
     ],
     "security": {
-      "assetProtocol": { "enable": true, "scope": ["**"] },
+      "assetProtocol": {
+        "enable": true,
+        "scope": {
+          "requireLiteralLeadingDot": false,
+          "allow": [
+            "**/*"
+          ]
+        }
+      },
       "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost https: data:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost"
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "resources": ["../browser-extension"],
+    "resources": {
+      "../browser-extension/manifest.json": "browser-extension/manifest.json",
+      "../browser-extension/background.js": "browser-extension/background.js",
+      "../browser-extension/popup.html": "browser-extension/popup.html",
+      "../browser-extension/popup.js": "browser-extension/popup.js",
+      "../browser-extension/popup.css": "browser-extension/popup.css"
+    },
     "icon": []
   }
 }

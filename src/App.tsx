@@ -323,14 +323,16 @@ function App() {
 
     const host = hostnameFor(trimmed);
     const preset = host ? sitePresets[host] : undefined;
+    const effectivePlaylist = preset?.playlist ?? playlist;
+    const effectiveQuality = preset?.quality ?? quality;
     if (preset) applyPreset(preset, host);
 
     try {
-      const result = await invoke<VideoInfo>('analyze_url', { url: trimmed, playlist });
+      const result = await invoke<VideoInfo>('analyze_url', { url: trimmed, playlist: effectivePlaylist });
       setInfo(result);
       const heights = [...new Set(result.formats.map((format) => format.height).filter((height): height is number => Boolean(height)))];
-      if (heights.length && quality !== 'best' && !heights.includes(Number(quality))) {
-        const below = heights.filter((height) => height <= Number(quality));
+      if (heights.length && effectiveQuality !== 'best' && !heights.includes(Number(effectiveQuality))) {
+        const below = heights.filter((height) => height <= Number(effectiveQuality));
         setQuality(String(below.length ? Math.max(...below) : Math.max(...heights)));
       }
     } catch (reason) {

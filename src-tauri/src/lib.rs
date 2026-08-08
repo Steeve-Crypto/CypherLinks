@@ -511,7 +511,7 @@ async fn run_download(app: AppHandle, request: DownloadRequest, cancel: Arc<Atom
     }
 
     if let Some(limit) = request.limit_rate.as_ref().map(|value| value.trim()).filter(|value| !value.is_empty()) {
-        let valid = Regex::new(r"(?i)^\d+(?:\.\d+)?[kmgt]?$ ".trim()).map_err(|e| e.to_string())?;
+        let valid = Regex::new(r"(?i)^\d+(?:\.\d+)?[kmgt]?$").map_err(|e| e.to_string())?;
         if !valid.is_match(limit) {
             return Err("Bandwidth limit must look like 500K, 2M, or 1.5G.".into());
         }
