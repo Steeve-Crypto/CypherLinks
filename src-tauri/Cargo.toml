@@ -1,6 +1,6 @@
 [package]
 name = "cypherlinks"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local-first desktop media downloader"
 authors = ["CypherLinks"]
 edition = "2021"
