@@ -106,7 +106,7 @@ async fn analyze_url(url: String) -> Result<VideoInfo, String> {
     let (program, mut prefix) = yt_dlp_command()?;
     prefix.extend([
         "--dump-single-json".into(),
-        if request.playlist { "--yes-playlist".into() } else { "--no-playlist".into() },
+        "--no-playlist".into(),
         "--no-warnings".into(),
         url,
     ]);
