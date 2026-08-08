@@ -88,6 +88,7 @@ async fn start_extension_bridge(app: AppHandle) {
 struct DownloadState {
     cancellation: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     queue: Arc<Mutex<Vec<DownloadRequest>>>,
+    inflight: Arc<Mutex<HashMap<String, DownloadRequest>>>,
     active: Arc<AtomicUsize>,
     max_concurrent: Arc<AtomicUsize>,
 }
@@ -97,6 +98,7 @@ impl Default for DownloadState {
         Self {
             cancellation: Arc::new(Mutex::new(HashMap::new())),
             queue: Arc::new(Mutex::new(Vec::new())),
+            inflight: Arc::new(Mutex::new(HashMap::new())),
             active: Arc::new(AtomicUsize::new(0)),
             max_concurrent: Arc::new(AtomicUsize::new(2)),
         }
@@ -222,8 +224,10 @@ fn save_runtime_config_file(app: &AppHandle, config: &RuntimeConfig) -> Result<(
 }
 
 async fn persist_queue(app: &AppHandle, state: &DownloadState) -> Result<(), String> {
-    let queue = state.queue.lock().await.clone();
-    std::fs::write(queue_path(app)?, serde_json::to_vec_pretty(&queue).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+    let mut requests = state.queue.lock().await.clone();
+    requests.extend(state.inflight.lock().await.values().cloned());
+    requests.sort_by(|a,b| a.id.cmp(&b.id)); requests.dedup_by(|a,b| a.id == b.id);
+    std::fs::write(queue_path(app)?, serde_json::to_vec_pretty(&requests).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
 }
 
 fn host_from_url(url: &str) -> String {
@@ -841,7 +845,7 @@ async fn pump_queue(app: AppHandle, state: DownloadState) {
             }
         };
 
-        if next.is_some() { let _ = persist_queue(&app, &state).await; }
+        if let Some(request) = next.as_ref() { state.inflight.lock().await.insert(request.id.clone(), request.clone()); let _ = persist_queue(&app, &state).await; }
         let Some(request) = next else {
             if let Some(wait) = wait_ms {
                 let delayed_app = app.clone();
@@ -868,7 +872,9 @@ async fn pump_queue(app: AppHandle, state: DownloadState) {
                 });
             }
             task_state.cancellation.lock().await.remove(&id);
+            task_state.inflight.lock().await.remove(&id);
             task_state.active.fetch_sub(1, Ordering::Relaxed);
+            let _ = persist_queue(&task_app, &task_state).await;
             schedule_queue_pump(task_app, task_state);
         });
     }
