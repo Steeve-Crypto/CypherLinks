@@ -1064,6 +1064,18 @@ fn telemetry_summary(app: AppHandle) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({"events": counts, "localOnly": true}))
 }
 
+
+#[tauri::command]
+async fn send_telemetry(app: AppHandle) -> Result<String, String> {
+    let config = load_runtime_config_file(&app);
+    if !config.telemetry_enabled { return Err("Telemetry is disabled. Enable it explicitly before sharing counters.".into()); }
+    let endpoint = std::env::var("CYPHERLINKS_TELEMETRY_ENDPOINT").map_err(|_| "This build does not define a telemetry endpoint.".to_string())?;
+    let summary = telemetry_summary(app.clone())?;
+    let payload = serde_json::json!({"product":"CypherLinks","version":env!("CARGO_PKG_VERSION"),"summary":summary.get("events").cloned().unwrap_or(Value::Null)});
+    reqwest::Client::new().post(endpoint).json(&payload).send().await.map_err(|e| format!("Telemetry submission failed: {e}"))?.error_for_status().map_err(|e| format!("Telemetry endpoint rejected the submission: {e}"))?;
+    Ok("Anonymous release counters shared successfully.".into())
+}
+
 #[tauri::command]
 fn compute_sha256(path: String) -> Result<String, String> { sha256_file(Path::new(&path)) }
 
@@ -1110,6 +1122,7 @@ pub fn run() {
             portable_mode_status,
             set_portable_mode,
             telemetry_summary,
+            send_telemetry,
             compute_sha256
         ])
         .run(tauri::generate_context!())
