@@ -821,6 +821,30 @@ async fn update_downloader() -> Result<String, String> {
     if output.status.success() { Ok(text.trim().to_string()) } else { Err(text.trim().to_string()) }
 }
 
+
+#[tauri::command]
+fn report_error(app: AppHandle, source: String, message: String, details: Option<String>) -> Result<String, String> {
+    let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join("cypherlinks-diagnostics.log");
+    let timestamp = unix_time_ms();
+    let safe_source = source.replace(['\n', '\r'], " ");
+    let safe_message = message.replace(['\n', '\r'], " ");
+    let entry = format!("[{timestamp}] source={safe_source} message={safe_message}\n{}\n---\n", details.unwrap_or_default());
+    use std::io::Write as _;
+    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(&path).map_err(|e| e.to_string())?;
+    file.write_all(entry.as_bytes()).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn open_diagnostics_folder(app: AppHandle) -> Result<String, String> {
+    let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    spawn_open(&dir)?;
+    Ok(dir.to_string_lossy().to_string())
+}
+
 #[tauri::command]
 fn dependency_status() -> serde_json::Value {
     serde_json::json!({
@@ -850,7 +874,9 @@ pub fn run() {
             update_queued_priority,
             update_downloader,
             dependency_status,
-            install_dependencies
+            install_dependencies,
+            report_error,
+            open_diagnostics_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running CypherLinks");
