@@ -9,6 +9,7 @@ use std::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
+    time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter, State};
 use tokio::{
@@ -147,11 +148,20 @@ struct DownloadRequest {
     transcode_preset: String,
     #[serde(default = "default_post_action")]
     post_action: String,
+    #[serde(default)]
+    scheduled_at_ms: Option<u64>,
 }
 
 fn default_duplicate_policy() -> String { "skip".into() }
 fn default_transcode_preset() -> String { "source".into() }
 fn default_post_action() -> String { "none".into() }
+fn unix_time_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
 
 #[derive(Debug, Serialize, Clone)]
 struct ProgressPayload {
@@ -643,21 +653,37 @@ async fn pump_queue(app: AppHandle, state: DownloadState) {
             break;
         }
 
-        let next = {
+        let (next, wait_ms) = {
             let mut queue = state.queue.lock().await;
-            let Some((index, _)) = queue
+            let now = unix_time_ms();
+            let due_index = queue
                 .iter()
                 .enumerate()
+                .filter(|(_, request)| request.scheduled_at_ms.unwrap_or(0) <= now)
                 .max_by(|(a_index, a), (b_index, b)| {
                     a.priority.cmp(&b.priority).then_with(|| b_index.cmp(a_index))
                 })
-            else {
-                break;
-            };
-            Some(queue.remove(index))
+                .map(|(index, _)| index);
+
+            if let Some(index) = due_index {
+                (Some(queue.remove(index)), None)
+            } else {
+                let earliest = queue.iter().filter_map(|request| request.scheduled_at_ms).min();
+                (None, earliest.map(|at| at.saturating_sub(now)))
+            }
         };
 
-        let Some(request) = next else { break };
+        let Some(request) = next else {
+            if let Some(wait) = wait_ms {
+                let delayed_app = app.clone();
+                let delayed_state = state.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(wait.max(1))).await;
+                    schedule_queue_pump(delayed_app, delayed_state);
+                });
+            }
+            break;
+        };
         let cancel = Arc::new(AtomicBool::new(false));
         state.cancellation.lock().await.insert(request.id.clone(), cancel.clone());
         state.active.fetch_add(1, Ordering::Relaxed);
@@ -685,9 +711,10 @@ async fn start_download(
     request: DownloadRequest,
     state: State<'_, DownloadState>,
 ) -> Result<(), String> {
+    let scheduled = request.scheduled_at_ms.map(|value| value > unix_time_ms()).unwrap_or(false);
     emit(&app, ProgressPayload {
-        id: request.id.clone(), status: "queued".into(), percent: Some(0.0),
-        speed: None, eta: None, filename: None, message: Some("Waiting in queue".into()),
+        id: request.id.clone(), status: if scheduled { "scheduled".into() } else { "queued".into() }, percent: Some(0.0),
+        speed: None, eta: None, filename: None, message: Some(if scheduled { "Scheduled".into() } else { "Waiting in queue".into() }),
     });
     state.queue.lock().await.push(request);
     schedule_queue_pump(app, state.inner().clone());
