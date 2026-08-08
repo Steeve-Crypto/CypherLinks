@@ -117,6 +117,8 @@ struct DownloadRequest {
     embed_thumbnail: bool,
     #[serde(default)]
     archive_path: Option<String>,
+    #[serde(default)]
+    filename_template: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -281,7 +283,15 @@ async fn run_download(app: AppHandle, request: DownloadRequest, cancel: Arc<Atom
     }
 
     let (program, mut args) = yt_dlp_command()?;
-    let output_template = "%(title).180B [%(id)s].%(ext)s";
+    let requested_template = request.filename_template.as_deref().unwrap_or("%(title).180B [%(id)s].%(ext)s").trim();
+    if requested_template.is_empty() || requested_template.len() > 220 || requested_template.contains("..") || requested_template.contains('/') || requested_template.contains('\\') {
+        return Err("Filename template must be a simple filename under 220 characters.".into());
+    }
+    let output_template = if requested_template.contains("%(ext)s") {
+        requested_template.to_string()
+    } else {
+        format!("{requested_template}.%(ext)s")
+    };
 
     args.extend([
         "--newline".into(),
@@ -292,7 +302,7 @@ async fn run_download(app: AppHandle, request: DownloadRequest, cancel: Arc<Atom
         "--paths".into(),
         request.output_dir.clone(),
         "--output".into(),
-        output_template.into(),
+        output_template,
         "--windows-filenames".into(),
     ]);
 
