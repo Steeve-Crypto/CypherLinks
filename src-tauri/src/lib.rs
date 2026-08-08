@@ -752,6 +752,19 @@ fn set_max_concurrent(app: AppHandle, value: usize, state: State<'_, DownloadSta
 }
 
 #[tauri::command]
+async fn update_queued_priority(app: AppHandle, id: String, priority: i32, state: State<'_, DownloadState>) -> Result<(), String> {
+    let mut queue = state.queue.lock().await;
+    if let Some(request) = queue.iter_mut().find(|request| request.id == id) {
+        request.priority = priority.clamp(-10, 10);
+        drop(queue);
+        schedule_queue_pump(app, state.inner().clone());
+        Ok(())
+    } else {
+        Err("Only queued or scheduled downloads can be reprioritized.".into())
+    }
+}
+
+#[tauri::command]
 async fn install_dependencies() -> Result<String, String> {
     #[cfg(target_os = "windows")]
     let mut cmd = { let mut c = Command::new("powershell"); c.args(["-NoProfile", "-Command", "winget install --id yt-dlp.yt-dlp -e --accept-source-agreements --accept-package-agreements; winget install --id Gyan.FFmpeg -e --accept-source-agreements --accept-package-agreements"]); c };
@@ -798,6 +811,7 @@ pub fn run() {
             start_download,
             cancel_download,
             set_max_concurrent,
+            update_queued_priority,
             update_downloader,
             dependency_status,
             install_dependencies
