@@ -137,6 +137,8 @@ struct DownloadRequest {
     priority: i32,
     #[serde(default)]
     limit_rate: Option<String>,
+    #[serde(default)]
+    proxy: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -326,6 +328,15 @@ async fn run_download(app: AppHandle, request: DownloadRequest, cancel: Arc<Atom
 
     if let Some(browser) = request.cookies_browser.as_ref().filter(|v| !v.is_empty() && *v != "none") {
         args.extend(["--cookies-from-browser".into(), browser.clone()]);
+    }
+
+    if let Some(proxy) = request.proxy.as_ref().map(|value| value.trim()).filter(|value| !value.is_empty()) {
+        let lower = proxy.to_ascii_lowercase();
+        let allowed = ["http://", "https://", "socks4://", "socks5://", "socks5h://"].iter().any(|prefix| lower.starts_with(prefix));
+        if !allowed {
+            return Err("Proxy must use http, https, socks4, socks5, or socks5h.".into());
+        }
+        args.extend(["--proxy".into(), proxy.to_string()]);
     }
 
     if let Some(limit) = request.limit_rate.as_ref().map(|value| value.trim()).filter(|value| !value.is_empty()) {
