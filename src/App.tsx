@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
+import { check } from '@tauri-apps/plugin-updater';
+import { relaunch } from '@tauri-apps/plugin-process';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
 import {
   AlertCircle,
   CheckCircle2,
@@ -172,6 +175,11 @@ function App() {
   const [maxConcurrent, setMaxConcurrent] = useState(() => Math.max(1, Math.min(6, Number(localStorage.getItem('cypherlinks-concurrency') || 2))));
   const [deps, setDeps] = useState<DependencyStatus | null>(null);
   const [toolMessage, setToolMessage] = useState('');
+  const [onboardingOpen, setOnboardingOpen] = useState(() => localStorage.getItem('cypherlinks-onboarded') !== 'true');
+  const [autoUpdates, setAutoUpdates] = useState(() => localStorage.getItem('cypherlinks-auto-updates') !== 'false');
+  const [updateMessage, setUpdateMessage] = useState('');
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const urlInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     localStorage.setItem('cypherlinks-history', JSON.stringify(items.slice(0, 150)));
@@ -188,6 +196,8 @@ function App() {
   useEffect(() => {
     localStorage.setItem('cypherlinks-watch-clipboard', String(watchClipboard));
   }, [watchClipboard]);
+
+  useEffect(() => { localStorage.setItem('cypherlinks-auto-updates', String(autoUpdates)); }, [autoUpdates]);
 
   useEffect(() => {
     localStorage.setItem('cypherlinks-concurrency', String(maxConcurrent));
@@ -221,6 +231,27 @@ function App() {
     invoke<string>('default_download_dir').then(setDownloadDir).catch(() => {});
     invoke<DependencyStatus>('dependency_status').then(setDeps).catch(() => {});
 
+    const dragUnlisten = getCurrentWebview().onDragDropEvent(async (event: any) => {
+      if (event.payload?.type !== 'drop') return;
+      const paths = event.payload.paths ?? [];
+      if (!paths.length) return;
+      try {
+        const dropped = await invoke<{ urls: string[]; media: string[] }>('ingest_dropped_paths', { paths });
+        if (dropped.urls.length) {
+          setUrl(dropped.urls[0]);
+          if (dropped.urls.length > 1) setBatchUrls(dropped.urls.join('\n'));
+          setNotice(`Imported ${dropped.urls.length} link${dropped.urls.length === 1 ? '' : 's'} from drag and drop.`);
+          setActiveTab('download');
+        }
+        if (dropped.media.length) {
+          const imported = dropped.media.map((path) => ({ id: crypto.randomUUID(), url: path, title: path.split(/[\\/]/).pop() || path, mode: 'video' as OutputMode, quality: 'local', priority: 0, progress: 100, status: 'finished' as DownloadStatus, filename: path, message: 'Imported local media' }));
+          setItems((current) => [...imported, ...current]);
+          setNotice(`Imported ${dropped.media.length} local media file${dropped.media.length === 1 ? '' : 's'}.`);
+          setActiveTab('queue');
+        }
+      } catch (reason) { setError(String(reason)); }
+    });
+
     const progressUnlisten = listen<ProgressEvent>('download-progress', ({ payload }) => {
       setItems((current) => current.map((item) => item.id === payload.id
         ? {
@@ -246,8 +277,30 @@ function App() {
     return () => {
       progressUnlisten.then((unlisten) => unlisten());
       extensionUnlisten.then((unlisten) => unlisten());
+      dragUnlisten.then((unlisten) => unlisten());
     };
   }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const mod = event.ctrlKey || event.metaKey;
+      if (mod && event.key.toLowerCase() === 'l') { event.preventDefault(); setActiveTab('download'); urlInputRef.current?.focus(); }
+      if (mod && event.key === '1') { event.preventDefault(); setActiveTab('download'); }
+      if (mod && event.key === '2') { event.preventDefault(); setActiveTab('queue'); }
+      if (mod && event.key === '3') { event.preventDefault(); setActiveTab('settings'); }
+      if (mod && event.key === 'Enter') { event.preventDefault(); if (activeTab === 'download') analyze(); }
+      if (event.key === '?' && !event.ctrlKey && !event.metaKey) setShortcutsOpen(true);
+      if (event.key === 'Escape') { setShortcutsOpen(false); setPreviewItem(null); }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [activeTab, url, playlist, sitePresets]);
+
+  useEffect(() => {
+    if (!autoUpdates || onboardingOpen) return;
+    const timer = window.setTimeout(() => { checkAppUpdate(true); }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [autoUpdates, onboardingOpen]);
 
   const availableHeights = useMemo(() => {
     if (!info) return new Set<number>();
@@ -486,6 +539,28 @@ function App() {
     }
   }
 
+  async function checkAppUpdate(silent = false) {
+    if (!silent) setUpdateMessage('Checking for signed updates…');
+    try {
+      const update = await check();
+      if (!update) { if (!silent) setUpdateMessage('CypherLinks is up to date.'); return; }
+      setUpdateMessage(`Downloading CypherLinks ${update.version}…`);
+      await update.downloadAndInstall();
+      setUpdateMessage(`CypherLinks ${update.version} installed. Restarting…`);
+      await relaunch();
+    } catch (reason) {
+      const message = String(reason);
+      if (!silent) setUpdateMessage(message.includes('endpoint') || message.includes('updater') ? 'Update service is not configured for this development build.' : message);
+      invoke('report_error', { source: 'updater', message, details: null }).catch(() => {});
+    }
+  }
+
+  function finishOnboarding() {
+    localStorage.setItem('cypherlinks-onboarded', 'true');
+    setOnboardingOpen(false);
+    urlInputRef.current?.focus();
+  }
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -526,6 +601,7 @@ function App() {
               <div className="source-input-row">
                 <Link2 size={18} />
                 <input
+                  ref={urlInputRef}
                   value={url}
                   onChange={(event) => setUrl(event.target.value)}
                   onKeyDown={(event) => event.key === 'Enter' && analyze()}
@@ -752,6 +828,22 @@ function App() {
               <div className="tool-actions"><button className="secondary-button" onClick={updateDownloader}><RefreshCw size={15} /> Update yt-dlp</button><button className="secondary-button" onClick={installDependencies}><Download size={15} /> Install tools</button></div>
               {toolMessage && <pre className="tool-message">{toolMessage}</pre>}
             </div>
+            <div className="panel settings-card">
+              <div className="card-icon"><RefreshCw size={18} /></div>
+              <h2>Application updates</h2>
+              <p>Check for cryptographically signed CypherLinks releases and install verified updates.</p>
+              <label className="toggle-row"><span>Automatic update checks</span><input type="checkbox" checked={autoUpdates} onChange={(event) => setAutoUpdates(event.target.checked)} /></label>
+              <button className="secondary-button full" onClick={() => checkAppUpdate(false)}><RefreshCw size={15} /> Check for updates</button>
+              {updateMessage && <small>{updateMessage}</small>}
+            </div>
+
+            <div className="panel settings-card">
+              <div className="card-icon"><AlertCircle size={18} /></div>
+              <h2>Diagnostics</h2>
+              <p>Unexpected application errors are written to a local diagnostic log. Nothing is uploaded automatically.</p>
+              <button className="secondary-button full" onClick={() => invoke<string>('open_diagnostics_folder').then((path) => setToolMessage(`Opened diagnostics: ${path}`)).catch((reason) => setToolMessage(String(reason)))}><FolderOpen size={15} /> Open diagnostics folder</button>
+              <button className="text-button" onClick={() => setShortcutsOpen(true)}>View keyboard shortcuts</button>
+            </div>
           </div>
 
           <div className="panel presets-panel">
@@ -785,6 +877,32 @@ function App() {
       )}
 
       <footer className="app-footer">CypherLinks does not bypass DRM or access controls. Use it only for media you own or have permission to download.</footer>
+      {onboardingOpen && (
+        <div className="modal-backdrop onboarding-backdrop">
+          <section className="onboarding-card" role="dialog" aria-modal="true" aria-label="Welcome to CypherLinks">
+            <div className="onboarding-brand"><div className="brand-mark">CL</div><span>CypherLinks</span></div>
+            <span className="kicker">FIRST RUN</span>
+            <h1>Your local media workspace is ready.</h1>
+            <p>CypherLinks keeps download history and settings on this device. Before the first download, confirm the two required media tools.</p>
+            <div className="onboarding-tools">
+              <div><span>yt-dlp</span><b className={deps?.ytDlp ? 'ok' : 'missing'}>{deps?.ytDlp ? 'Ready' : 'Missing'}</b></div>
+              <div><span>FFmpeg</span><b className={deps?.ffmpeg ? 'ok' : 'missing'}>{deps?.ffmpeg ? 'Ready' : 'Missing'}</b></div>
+            </div>
+            {deps && (!deps.ytDlp || !deps.ffmpeg) && <button className="secondary-button full" onClick={installDependencies}><Download size={15} /> Install required tools</button>}
+            <div className="onboarding-note">Tip: drop links, .txt/.url files, or local media anywhere onto the window. Press <kbd>Ctrl/⌘ L</kbd> to focus the URL field.</div>
+            <button className="download-button full" onClick={finishOnboarding} disabled={!deps}>Enter CypherLinks</button>
+          </section>
+        </div>
+      )}
+
+      {shortcutsOpen && (
+        <div className="modal-backdrop" onMouseDown={() => setShortcutsOpen(false)}>
+          <section className="shortcut-card" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="modal-title"><div><span className="kicker">KEYBOARD</span><h2>Shortcuts</h2></div><button className="icon-button" onClick={() => setShortcutsOpen(false)}><X size={16} /></button></div>
+            <div className="shortcut-list"><span>Focus URL</span><kbd>Ctrl/⌘ L</kbd><span>Download tab</span><kbd>Ctrl/⌘ 1</kbd><span>Queue tab</span><kbd>Ctrl/⌘ 2</kbd><span>Settings tab</span><kbd>Ctrl/⌘ 3</kbd><span>Analyze URL</span><kbd>Ctrl/⌘ Enter</kbd><span>Close dialog</span><kbd>Esc</kbd></div>
+          </section>
+        </div>
+      )}
     </main>
   );
 }

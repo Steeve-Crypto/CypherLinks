@@ -822,6 +822,29 @@ async fn update_downloader() -> Result<String, String> {
 }
 
 
+
+#[tauri::command]
+fn ingest_dropped_paths(paths: Vec<String>) -> Result<serde_json::Value, String> {
+    let url_re = Regex::new(r#"https?://[^\\s<>\"']+"#).map_err(|e| e.to_string())?;
+    let media_exts = ["mp4", "mkv", "webm", "mov", "avi", "mp3", "m4a", "aac", "wav", "flac", "ogg"];
+    let mut urls = Vec::new();
+    let mut media = Vec::new();
+    for raw in paths {
+        let path = PathBuf::from(&raw);
+        if !path.is_file() { continue; }
+        let ext = path.extension().and_then(|v| v.to_str()).unwrap_or("").to_lowercase();
+        if media_exts.contains(&ext.as_str()) {
+            media.push(path.to_string_lossy().to_string());
+        } else if ["txt", "url", "webloc"].contains(&ext.as_str()) {
+            if let Ok(text) = std::fs::read_to_string(&path) {
+                urls.extend(url_re.find_iter(&text).map(|m| m.as_str().trim_end_matches([')', ']', ',', '.']).to_string()));
+            }
+        }
+    }
+    urls.sort(); urls.dedup();
+    Ok(serde_json::json!({ "urls": urls, "media": media }))
+}
+
 #[tauri::command]
 fn report_error(app: AppHandle, source: String, message: String, details: Option<String>) -> Result<String, String> {
     let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
@@ -877,6 +900,7 @@ pub fn run() {
             update_downloader,
             dependency_status,
             install_dependencies,
+            ingest_dropped_paths,
             report_error,
             open_diagnostics_folder
         ])
