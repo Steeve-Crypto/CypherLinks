@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { open } from '@tauri-apps/plugin-dialog';
+import { open, save } from '@tauri-apps/plugin-dialog';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
@@ -101,6 +101,10 @@ type DownloadItem = {
 
 type DependencyStatus = { ytDlp: boolean; ffmpeg: boolean };
 
+type DownloadRule = { id: string; hostPattern: string; quality?: string | null; mode?: string | null; limitRate?: string | null; priority?: number | null; transcodePreset?: string | null; enabled: boolean };
+type RuntimeConfig = { rules: DownloadRule[]; domainRateLimits: Record<string,string>; providerAdapters: Record<string,string[]>; telemetryEnabled: boolean };
+type PortableStatus = { enabled: boolean; dataPath: string };
+
 const qualityOptions = ['best', '2160', '1440', '1080', '720', '480', '360'];
 const defaultTemplate = '%(title).180B [%(id)s].%(ext)s';
 
@@ -180,6 +184,16 @@ function App() {
   const [updateMessage, setUpdateMessage] = useState('');
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const [checksumSha256, setChecksumSha256] = useState('');
+  const [historyQuery, setHistoryQuery] = useState('');
+  const [historyStatus, setHistoryStatus] = useState('all');
+  const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig>({ rules: [], domainRateLimits: {}, providerAdapters: {}, telemetryEnabled: false });
+  const [portableStatus, setPortableStatus] = useState<PortableStatus | null>(null);
+  const [ruleHost, setRuleHost] = useState('');
+  const [domainHost, setDomainHost] = useState('');
+  const [domainRate, setDomainRate] = useState('2M');
+  const [providerHost, setProviderHost] = useState('');
+  const [providerArgs, setProviderArgs] = useState('');
   const urlInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -231,6 +245,8 @@ function App() {
   useEffect(() => {
     invoke<string>('default_download_dir').then(setDownloadDir).catch(() => {});
     invoke<DependencyStatus>('dependency_status').then(setDeps).catch(() => {});
+    invoke<RuntimeConfig>('load_runtime_config').then(setRuntimeConfig).catch(() => {});
+    invoke<PortableStatus>('portable_mode_status').then(setPortableStatus).catch(() => {});
 
     const dragUnlisten = getCurrentWebview().onDragDropEvent(async (event: any) => {
       if (event.payload?.type !== 'drop') return;
@@ -314,6 +330,12 @@ function App() {
   const activeCount = items.filter((item) => ['downloading', 'processing'].includes(item.status)).length;
   const waitingCount = items.filter((item) => ['queued', 'scheduled'].includes(item.status)).length;
   const finishedCount = items.filter((item) => item.status === 'finished').length;
+  const filteredItems = items.filter((item) => {
+    const q = historyQuery.trim().toLowerCase();
+    const matchesQuery = !q || item.title.toLowerCase().includes(q) || item.url.toLowerCase().includes(q) || (item.filename || '').toLowerCase().includes(q);
+    const matchesStatus = historyStatus === 'all' || item.status === historyStatus;
+    return matchesQuery && matchesStatus;
+  });
 
   function applyPreset(preset: SitePreset, host?: string) {
     setMode(preset.mode);
@@ -429,6 +451,8 @@ function App() {
       transcodePreset,
       postAction,
       scheduledAtMs: scheduledEpoch() ?? null,
+      checksumSha256: checksumSha256.trim() || null,
+      provider: null,
     };
   }
 
@@ -552,6 +576,44 @@ function App() {
     setError('');
     setActiveTab('download');
     setNotice(`Received ${links.length} dropped link${links.length === 1 ? '' : 's'}.`);
+  }
+
+  async function persistRuntimeConfig(next: RuntimeConfig) {
+    setRuntimeConfig(next);
+    await invoke('save_runtime_config', { config: next }).catch((reason) => setToolMessage(String(reason)));
+  }
+
+  async function addRule() {
+    const host = ruleHost.trim(); if (!host) return;
+    const next = { ...runtimeConfig, rules: [...runtimeConfig.rules, { id: crypto.randomUUID(), hostPattern: host, quality, mode, limitRate: bandwidthLimit.trim() || null, priority, transcodePreset, enabled: true }] };
+    await persistRuntimeConfig(next); setRuleHost(''); setToolMessage(`Rule added for ${host}.`);
+  }
+
+  async function addDomainLimit() {
+    const host = domainHost.trim(); if (!host || !domainRate.trim()) return;
+    await persistRuntimeConfig({ ...runtimeConfig, domainRateLimits: { ...runtimeConfig.domainRateLimits, [host]: domainRate.trim() } });
+    setDomainHost(''); setToolMessage(`Rate limit saved for ${host}.`);
+  }
+
+  async function addProviderAdapter() {
+    const host = providerHost.trim(); if (!host) return;
+    const args = providerArgs.trim().split(/\s+/).filter(Boolean);
+    await persistRuntimeConfig({ ...runtimeConfig, providerAdapters: { ...runtimeConfig.providerAdapters, [host]: args } });
+    setProviderHost(''); setProviderArgs(''); setToolMessage(`Provider adapter saved for ${host}.`);
+  }
+
+  async function exportSettings() {
+    const destination = await save({ defaultPath: 'cypherlinks-settings.json', filters: [{ name: 'CypherLinks settings', extensions: ['json'] }] });
+    if (typeof destination === 'string') await invoke('export_runtime_config', { destination }).then(() => setToolMessage(`Settings exported to ${destination}`)).catch((reason) => setToolMessage(String(reason)));
+  }
+
+  async function importSettings() {
+    const source = await open({ multiple: false, filters: [{ name: 'CypherLinks settings', extensions: ['json'] }] });
+    if (typeof source === 'string') await invoke<RuntimeConfig>('import_runtime_config', { source }).then((config) => { setRuntimeConfig(config); setToolMessage('Settings imported successfully.'); }).catch((reason) => setToolMessage(String(reason)));
+  }
+
+  async function togglePortable(enabled: boolean) {
+    await invoke('set_portable_mode', { enabled }).then(async () => { setPortableStatus(await invoke<PortableStatus>('portable_mode_status')); setToolMessage('Portable mode changed. Restart CypherLinks to use the new storage location.'); }).catch((reason) => setToolMessage(String(reason)));
   }
 
   async function checkAppUpdate(silent = false) {
@@ -731,6 +793,7 @@ function App() {
             </div>
 
             <div className="form-row two-column">
+              <label><span>Expected SHA-256 (optional)</span><input value={checksumSha256} onChange={(event) => setChecksumSha256(event.target.value)} placeholder="Verify final file checksum" /></label>
               <label><span>Bandwidth limit</span><input value={bandwidthLimit} onChange={(event) => setBandwidthLimit(event.target.value)} placeholder="Unlimited / 5M" /></label>
               <label><span>Browser cookies</span><select value={cookiesBrowser} onChange={(event) => setCookiesBrowser(event.target.value)}><option value="none">None</option><option value="chrome">Chrome</option><option value="firefox">Firefox</option><option value="edge">Edge</option><option value="safari">Safari</option></select></label>
             </div>
@@ -774,12 +837,13 @@ function App() {
               <div><span className="kicker">QUEUE</span><h1>Download activity</h1></div>
               {items.some((item) => ['finished', 'error', 'cancelled'].includes(item.status)) && <button className="secondary-button" onClick={clearFinished}><Trash2 size={15} /> Clear completed</button>}
             </div>
+            <div className="history-controls"><input value={historyQuery} onChange={(event) => setHistoryQuery(event.target.value)} placeholder="Search history, URLs, or files" /><select value={historyStatus} onChange={(event) => setHistoryStatus(event.target.value)}><option value="all">All statuses</option><option value="finished">Finished</option><option value="downloading">Downloading</option><option value="queued">Queued</option><option value="scheduled">Scheduled</option><option value="error">Errors</option></select></div>
 
             {items.length === 0 ? (
               <div className="queue-empty"><Package size={24} /><h3>Nothing queued yet</h3><p>Analyze a link or send one from the browser extension.</p><button className="secondary-button" onClick={() => setActiveTab('download')}>Go to downloader</button></div>
             ) : (
               <div className="queue-list">
-                {items.map((item) => (
+                {filteredItems.map((item) => (
                   <article className="queue-item" key={item.id}>
                     <div className={`queue-status-icon ${item.status}`}>
                       {item.status === 'finished' ? <CheckCircle2 size={18} /> : item.status === 'error' ? <XCircle size={18} /> : item.mode === 'audio' ? <Music2 size={18} /> : <Video size={18} />}
@@ -866,6 +930,22 @@ function App() {
               <button className="secondary-button full" onClick={() => invoke<string>('open_diagnostics_folder').then((path) => setToolMessage(`Opened diagnostics: ${path}`)).catch((reason) => setToolMessage(String(reason)))}><FolderOpen size={15} /> Open diagnostics folder</button>
               <button className="text-button" onClick={() => setShortcutsOpen(true)}>View keyboard shortcuts</button>
             </div>
+          </div>
+
+          <div className="panel presets-panel automation-panel">
+            <div className="panel-heading"><div><span className="kicker">AUTOMATION</span><h2>Rules, limits & providers</h2></div><span className="muted">Applied by the native queue engine</span></div>
+            <div className="automation-grid">
+              <div><h3>Download rule</h3><p>Automatically apply the current quality, mode, priority and transcode preset to matching domains.</p><div className="inline-form"><input value={ruleHost} onChange={(e)=>setRuleHost(e.target.value)} placeholder="*.example.com"/><button className="secondary-button" onClick={addRule}>Add rule</button></div><div className="mini-list">{runtimeConfig.rules.map(rule => <div key={rule.id}><span>{rule.hostPattern}</span><button className="text-button" onClick={()=>persistRuntimeConfig({...runtimeConfig,rules:runtimeConfig.rules.filter(r=>r.id!==rule.id)})}>Remove</button></div>)}</div></div>
+              <div><h3>Per-domain rate limits</h3><p>Override the global transfer cap for specific hosts.</p><div className="inline-form"><input value={domainHost} onChange={(e)=>setDomainHost(e.target.value)} placeholder="example.com"/><input value={domainRate} onChange={(e)=>setDomainRate(e.target.value)} placeholder="2M"/><button className="secondary-button" onClick={addDomainLimit}>Save</button></div><div className="mini-list">{Object.entries(runtimeConfig.domainRateLimits).map(([host,rate])=><div key={host}><span>{host} · {rate}</span><button className="text-button" onClick={()=>{const next={...runtimeConfig.domainRateLimits};delete next[host];persistRuntimeConfig({...runtimeConfig,domainRateLimits:next});}}>Remove</button></div>)}</div></div>
+              <div><h3>Provider adapters</h3><p>Attach advanced yt-dlp arguments to a supported host without modifying the core downloader.</p><div className="inline-form"><input value={providerHost} onChange={(e)=>setProviderHost(e.target.value)} placeholder="media.example.com"/><input value={providerArgs} onChange={(e)=>setProviderArgs(e.target.value)} placeholder="--extractor-args …"/><button className="secondary-button" onClick={addProviderAdapter}>Save</button></div><div className="mini-list">{Object.entries(runtimeConfig.providerAdapters).map(([host,args])=><div key={host}><span>{host} · {args.join(' ')}</span><button className="text-button" onClick={()=>{const next={...runtimeConfig.providerAdapters};delete next[host];persistRuntimeConfig({...runtimeConfig,providerAdapters:next});}}>Remove</button></div>)}</div></div>
+            </div>
+          </div>
+
+          <div className="settings-grid production-settings">
+            <div className="panel settings-card"><div className="card-icon"><Save size={18}/></div><h2>Settings portability</h2><p>Export or import rules, rate limits, provider adapters, and telemetry preferences.</p><div className="tool-actions"><button className="secondary-button" onClick={exportSettings}>Export settings</button><button className="secondary-button" onClick={importSettings}>Import settings</button></div></div>
+            <div className="panel settings-card"><div className="card-icon"><Package size={18}/></div><h2>Portable mode</h2><p>Store runtime configuration and queue state beside the executable for removable or self-contained installations.</p><label className="toggle-row"><span>Portable storage</span><input type="checkbox" checked={portableStatus?.enabled ?? false} onChange={(e)=>togglePortable(e.target.checked)}/></label><small>{portableStatus?.dataPath}</small></div>
+            <div className="panel settings-card"><div className="card-icon"><Globe size={18}/></div><h2>Privacy-preserving telemetry</h2><p>Opt in to anonymous local release counters. No URLs, titles, filenames, or media metadata are recorded.</p><label className="toggle-row"><span>Collect local counters</span><input type="checkbox" checked={runtimeConfig.telemetryEnabled} onChange={(e)=>persistRuntimeConfig({...runtimeConfig,telemetryEnabled:e.target.checked})}/></label><small>Telemetry remains local unless a future release explicitly asks before transmission.</small></div>
+            <div className="panel settings-card"><div className="card-icon"><Link2 size={18}/></div><h2>Automation API & CLI</h2><p>Local scripts can use <code>127.0.0.1:47653</code>; headless workflows can use the included <code>cypherlinks-cli</code> binary.</p><small>See API.md for supported endpoints and examples.</small></div>
           </div>
 
           <div className="panel presets-panel">
