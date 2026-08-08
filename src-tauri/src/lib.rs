@@ -11,7 +11,7 @@ use std::{
     },
     time::{SystemTime, UNIX_EPOCH},
 };
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     net::TcpListener,
@@ -195,7 +195,7 @@ fn ffmpeg_available() -> bool {
 }
 
 #[tauri::command]
-async fn analyze_url(url: String) -> Result<VideoInfo, String> {
+async fn analyze_url(url: String, playlist: Option<bool>) -> Result<VideoInfo, String> {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
         return Err("Please enter a valid http(s) URL.".into());
     }
@@ -203,7 +203,7 @@ async fn analyze_url(url: String) -> Result<VideoInfo, String> {
     let (program, mut prefix) = yt_dlp_command()?;
     prefix.extend([
         "--dump-single-json".into(),
-        "--no-playlist".into(),
+        if playlist.unwrap_or(false) { "--yes-playlist".into() } else { "--no-playlist".into() },
         "--no-warnings".into(),
         url,
     ]);
@@ -257,6 +257,41 @@ async fn analyze_url(url: String) -> Result<VideoInfo, String> {
     })
 }
 
+
+fn spawn_open(target: &Path) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut c = std::process::Command::new("explorer");
+        c.arg(target);
+        c
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut c = std::process::Command::new("open");
+        c.arg(target);
+        c
+    };
+    #[cfg(target_os = "linux")]
+    let mut command = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(target);
+        c
+    };
+    command.spawn().map_err(|e| format!("Could not open folder: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn open_extension_folder(app: AppHandle) -> Result<String, String> {
+    let development = std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join("browser-extension");
+    let bundled = app.path().resource_dir().map_err(|e| e.to_string())?.join("browser-extension");
+    let folder = if development.exists() { development } else { bundled };
+    if !folder.exists() {
+        return Err("The bundled browser-extension folder could not be found.".into());
+    }
+    spawn_open(&folder)?;
+    Ok(folder.to_string_lossy().to_string())
+}
 
 #[tauri::command]
 async fn get_clipboard_text() -> Result<String, String> {
@@ -807,6 +842,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             analyze_url,
             get_clipboard_text,
+            open_extension_folder,
             default_download_dir,
             start_download,
             cancel_download,
