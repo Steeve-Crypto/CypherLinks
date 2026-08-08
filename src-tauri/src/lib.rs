@@ -44,7 +44,7 @@ async fn start_extension_bridge(app: AppHandle) {
             let headers = &request[..header_end];
 
             if headers.starts_with("OPTIONS ") {
-                let response = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: http://localhost\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nContent-Length: 0\r\n\r\n";
+                let response = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nContent-Length: 0\r\n\r\n";
                 let _ = stream.write_all(response.as_bytes()).await;
                 return;
             }
@@ -56,7 +56,8 @@ async fn start_extension_bridge(app: AppHandle) {
             if headers.starts_with("GET /queue ") {
                 let state = app.state::<DownloadState>();
                 let queue = state.queue.lock().await.clone();
-                let body = serde_json::json!({"queued":queue.len(),"active":state.active.load(Ordering::Relaxed),"items":queue}).to_string();
+                let items: Vec<Value> = queue.iter().map(|r| serde_json::json!({"id":r.id,"host":host_from_url(&r.url),"mode":r.mode,"quality":r.quality,"priority":r.priority,"scheduledAtMs":r.scheduled_at_ms})).collect();
+                let body = serde_json::json!({"queued":queue.len(),"active":state.active.load(Ordering::Relaxed),"items":items}).to_string();
                 let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}", body.len(), body);
                 let _ = stream.write_all(response.as_bytes()).await; return;
             }

@@ -264,8 +264,8 @@ CypherLinks includes a native automation layer for repeatable workflows and resi
 - **Provider adapters** attach host-specific yt-dlp arguments without modifying the core downloader.
 - **Local REST API and CLI** support localhost automation and headless scripted downloads. See `API.md`.
 - **History search and filters** make completed, failed, queued, and scheduled jobs easier to locate.
-- **Telemetry is opt-in** and records only coarse local release counters; URLs, titles, filenames, and media metadata are excluded.
+- **Telemetry is opt-in** and records only coarse release counters; sharing is a separate explicit action, and URLs, titles, filenames, hostnames, and media metadata are excluded.
 
 ### Privacy model
 
-CypherLinks is local-first. Runtime configuration, queue state, diagnostics, history, and opt-in telemetry remain on the device. The localhost API binds only to `127.0.0.1`. Provider credentials should not be embedded in provider-adapter arguments or committed to source control.
+CypherLinks is local-first. Runtime configuration, queue state, diagnostics, and history remain on the device. Opt-in telemetry counters remain local unless the user explicitly selects the sharing action in a release configured with a telemetry endpoint. The localhost API binds only to `127.0.0.1`. Provider credentials should not be embedded in provider-adapter arguments or committed to source control.
