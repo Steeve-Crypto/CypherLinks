@@ -39,7 +39,7 @@ type VideoInfo = {
 
 type ProgressEvent = {
   id: string;
-  status: 'downloading' | 'processing' | 'finished' | 'error' | 'cancelled';
+  status: 'queued' | 'downloading' | 'processing' | 'finished' | 'error' | 'cancelled';
   percent?: number;
   speed?: string;
   eta?: string;
@@ -105,6 +105,8 @@ function App() {
   const [updateMessage, setUpdateMessage] = useState('');
   const [sitePresets, setSitePresets] = useState<Record<string, SitePreset>>(() => { try { return JSON.parse(localStorage.getItem('linkforge-site-presets') || '{}'); } catch { return {}; } });
   const [presetMessage, setPresetMessage] = useState('');
+  const [priority, setPriority] = useState(0);
+  const [maxConcurrent, setMaxConcurrent] = useState(() => Number(localStorage.getItem('linkforge-concurrency') || 2));
   const [watchClipboard, setWatchClipboard] = useState(() => localStorage.getItem('linkforge-watch-clipboard') === 'true');
   const [clipboardCandidate, setClipboardCandidate] = useState('');
 
@@ -112,6 +114,7 @@ function App() {
   useEffect(() => { localStorage.setItem('linkforge-watch-clipboard', String(watchClipboard)); }, [watchClipboard]);
   useEffect(() => { localStorage.setItem('linkforge-filename-template', filenameTemplate); }, [filenameTemplate]);
   useEffect(() => { localStorage.setItem('linkforge-site-presets', JSON.stringify(sitePresets)); }, [sitePresets]);
+  useEffect(() => { localStorage.setItem('linkforge-concurrency', String(maxConcurrent)); invoke('set_max_concurrent', { value: maxConcurrent }).catch(() => {}); }, [maxConcurrent]);
 
   useEffect(() => {
     if (!watchClipboard) return;
@@ -226,11 +229,11 @@ function App() {
       mode,
       quality,
       progress: 0,
-      status: 'downloading',
+      status: 'queued',
     };
     setItems((current) => [item, ...current]);
     try {
-      const request = { id, url: item.url, outputDir: downloadDir, mode, quality, subtitles, playlist, cookiesBrowser: cookiesBrowser === 'none' ? null : cookiesBrowser, embedMetadata, embedThumbnail, archivePath: `${downloadDir}/.linkforge-archive.txt`, filenameTemplate };
+      const request = { id, url: item.url, outputDir: downloadDir, mode, quality, subtitles, playlist, cookiesBrowser: cookiesBrowser === 'none' ? null : cookiesBrowser, embedMetadata, embedThumbnail, archivePath: `${downloadDir}/.linkforge-archive.txt`, filenameTemplate, priority };
       const delay = scheduledAt ? Math.max(0, new Date(scheduledAt).getTime() - Date.now()) : 0;
       if (delay > 0) {
         setItems((current) => current.map((entry) => entry.id === id ? { ...entry, message: `Scheduled for ${new Date(scheduledAt).toLocaleString()}` } : entry));
@@ -254,8 +257,8 @@ function App() {
       try {
         const meta = await invoke<VideoInfo>('analyze_url', { url: batchUrl });
         const id = crypto.randomUUID();
-        setItems((current) => [{ id, url: batchUrl, title: meta.title, mode, quality, progress: 0, status: 'downloading' }, ...current]);
-        await invoke('start_download', { request: { id, url: batchUrl, outputDir: downloadDir, mode, quality, subtitles, playlist, cookiesBrowser: cookiesBrowser === 'none' ? null : cookiesBrowser, embedMetadata, embedThumbnail, archivePath: `${downloadDir}/.linkforge-archive.txt`, filenameTemplate } });
+        setItems((current) => [{ id, url: batchUrl, title: meta.title, mode, quality, progress: 0, status: 'queued' }, ...current]);
+        await invoke('start_download', { request: { id, url: batchUrl, outputDir: downloadDir, mode, quality, subtitles, playlist, cookiesBrowser: cookiesBrowser === 'none' ? null : cookiesBrowser, embedMetadata, embedThumbnail, archivePath: `${downloadDir}/.linkforge-archive.txt`, filenameTemplate, priority } });
       } catch (e) { setError(String(e)); }
     }
   }
@@ -344,6 +347,8 @@ function App() {
               <label className="checkbox-row"><input type="checkbox" checked={embedThumbnail} onChange={(e) => setEmbedThumbnail(e.target.checked)} /><span>Embed thumbnail</span></label>
               <label className="control-group"><span>Browser cookies</span><select value={cookiesBrowser} onChange={(e) => setCookiesBrowser(e.target.value)}><option value="none">None</option><option value="chrome">Chrome</option><option value="firefox">Firefox</option><option value="edge">Edge</option><option value="safari">Safari</option></select></label>
               <label className="control-group" style={{gridColumn:'1 / -1'}}><span>Filename template</span><input value={filenameTemplate} onChange={(e) => setFilenameTemplate(e.target.value)} placeholder="%(title)s [%(id)s].%(ext)s" /></label>
+              <label className="control-group"><span>Queue priority</span><select value={priority} onChange={(e) => setPriority(Number(e.target.value))}><option value={10}>High</option><option value={0}>Normal</option><option value={-10}>Low</option></select></label>
+              <label className="control-group"><span>Concurrent downloads</span><select value={maxConcurrent} onChange={(e) => setMaxConcurrent(Number(e.target.value))}>{[1,2,3,4,5,6].map((value) => <option value={value} key={value}>{value}</option>)}</select></label>
             </div>
 
             <div style={{display:'flex', gap:8, alignItems:'center', marginBottom:10}}><button className="ghost" onClick={saveSitePreset}>Save site preset</button>{presetMessage && <span className="download-meta">{presetMessage}</span>}</div>
@@ -387,7 +392,7 @@ function App() {
                     {item.message && <span className="message">{item.message}</span>}
                   </div>
                 </div>
-                {['downloading', 'processing'].includes(item.status) && (
+                {['queued', 'downloading', 'processing'].includes(item.status) && (
                   <button className="icon-button" onClick={() => cancel(item.id)} title="Cancel"><Square size={15} fill="currentColor" /></button>
                 )}
               </article>

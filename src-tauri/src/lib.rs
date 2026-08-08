@@ -6,7 +6,7 @@ use std::{
     path::PathBuf,
     process::Stdio,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
 };
@@ -70,9 +70,23 @@ async fn start_extension_bridge(app: AppHandle) {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone)]
 struct DownloadState {
     cancellation: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
+    queue: Arc<Mutex<Vec<DownloadRequest>>>,
+    active: Arc<AtomicUsize>,
+    max_concurrent: Arc<AtomicUsize>,
+}
+
+impl Default for DownloadState {
+    fn default() -> Self {
+        Self {
+            cancellation: Arc::new(Mutex::new(HashMap::new())),
+            queue: Arc::new(Mutex::new(Vec::new())),
+            active: Arc::new(AtomicUsize::new(0)),
+            max_concurrent: Arc::new(AtomicUsize::new(2)),
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -119,6 +133,8 @@ struct DownloadRequest {
     archive_path: Option<String>,
     #[serde(default)]
     filename_template: Option<String>,
+    #[serde(default)]
+    priority: i32,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -436,40 +452,97 @@ async fn run_download(app: AppHandle, request: DownloadRequest, cancel: Arc<Atom
     }
 }
 
+fn schedule_queue_pump(app: AppHandle, state: DownloadState) {
+    tauri::async_runtime::spawn(async move {
+        pump_queue(app, state).await;
+    });
+}
+
+async fn pump_queue(app: AppHandle, state: DownloadState) {
+    loop {
+        if state.active.load(Ordering::Relaxed) >= state.max_concurrent.load(Ordering::Relaxed) {
+            break;
+        }
+
+        let next = {
+            let mut queue = state.queue.lock().await;
+            let Some((index, _)) = queue
+                .iter()
+                .enumerate()
+                .max_by(|(a_index, a), (b_index, b)| {
+                    a.priority.cmp(&b.priority).then_with(|| b_index.cmp(a_index))
+                })
+            else {
+                break;
+            };
+            Some(queue.remove(index))
+        };
+
+        let Some(request) = next else { break };
+        let cancel = Arc::new(AtomicBool::new(false));
+        state.cancellation.lock().await.insert(request.id.clone(), cancel.clone());
+        state.active.fetch_add(1, Ordering::Relaxed);
+
+        let id = request.id.clone();
+        let task_app = app.clone();
+        let task_state = state.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Err(message) = run_download(task_app.clone(), request, cancel).await {
+                emit(&task_app, ProgressPayload {
+                    id: id.clone(), status: "error".into(), percent: None,
+                    speed: None, eta: None, filename: None, message: Some(message),
+                });
+            }
+            task_state.cancellation.lock().await.remove(&id);
+            task_state.active.fetch_sub(1, Ordering::Relaxed);
+            schedule_queue_pump(task_app, task_state);
+        });
+    }
+}
+
 #[tauri::command]
 async fn start_download(
     app: AppHandle,
     request: DownloadRequest,
     state: State<'_, DownloadState>,
 ) -> Result<(), String> {
-    let cancel = Arc::new(AtomicBool::new(false));
-    state.cancellation.lock().await.insert(request.id.clone(), cancel.clone());
-
-    let id = request.id.clone();
-    let app_for_task = app.clone();
-    let state_map = state.cancellation.clone();
-
-    tauri::async_runtime::spawn(async move {
-        if let Err(message) = run_download(app_for_task.clone(), request, cancel).await {
-            emit(&app_for_task, ProgressPayload {
-                id: id.clone(), status: "error".into(), percent: None,
-                speed: None, eta: None, filename: None, message: Some(message),
-            });
-        }
-        state_map.lock().await.remove(&id);
+    emit(&app, ProgressPayload {
+        id: request.id.clone(), status: "queued".into(), percent: Some(0.0),
+        speed: None, eta: None, filename: None, message: Some("Waiting in queue".into()),
     });
-
+    state.queue.lock().await.push(request);
+    schedule_queue_pump(app, state.inner().clone());
     Ok(())
 }
 
 #[tauri::command]
-async fn cancel_download(id: String, state: State<'_, DownloadState>) -> Result<(), String> {
+async fn cancel_download(app: AppHandle, id: String, state: State<'_, DownloadState>) -> Result<(), String> {
+    {
+        let mut queue = state.queue.lock().await;
+        if let Some(index) = queue.iter().position(|request| request.id == id) {
+            queue.remove(index);
+            emit(&app, ProgressPayload {
+                id, status: "cancelled".into(), percent: None,
+                speed: None, eta: None, filename: None, message: Some("Removed from queue".into()),
+            });
+            return Ok(());
+        }
+    }
+
     if let Some(flag) = state.cancellation.lock().await.get(&id) {
         flag.store(true, Ordering::Relaxed);
         Ok(())
     } else {
         Err("Download is no longer active.".into())
     }
+}
+
+#[tauri::command]
+fn set_max_concurrent(app: AppHandle, value: usize, state: State<'_, DownloadState>) -> Result<usize, String> {
+    let value = value.clamp(1, 6);
+    state.max_concurrent.store(value, Ordering::Relaxed);
+    schedule_queue_pump(app, state.inner().clone());
+    Ok(value)
 }
 
 #[tauri::command]
@@ -518,6 +591,7 @@ pub fn run() {
             default_download_dir,
             start_download,
             cancel_download,
+            set_max_concurrent,
             update_downloader,
             dependency_status,
             install_dependencies
