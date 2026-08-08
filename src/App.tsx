@@ -91,8 +91,26 @@ function App() {
   const [scheduledAt, setScheduledAt] = useState('');
   const [deps, setDeps] = useState<{ytDlp:boolean; ffmpeg:boolean} | null>(null);
   const [updateMessage, setUpdateMessage] = useState('');
+  const [watchClipboard, setWatchClipboard] = useState(() => localStorage.getItem('linkforge-watch-clipboard') === 'true');
+  const [clipboardCandidate, setClipboardCandidate] = useState('');
 
   useEffect(() => { localStorage.setItem('linkforge-history', JSON.stringify(items.slice(0, 100))); }, [items]);
+  useEffect(() => { localStorage.setItem('linkforge-watch-clipboard', String(watchClipboard)); }, [watchClipboard]);
+
+  useEffect(() => {
+    if (!watchClipboard) return;
+    let lastSeen = '';
+    const timer = window.setInterval(async () => {
+      try {
+        const value = (await invoke<string>('get_clipboard_text')).trim();
+        if (/^https?:\/\//i.test(value) && value !== lastSeen && value !== url.trim()) {
+          lastSeen = value;
+          setClipboardCandidate(value);
+        }
+      } catch { /* Clipboard support is optional. */ }
+    }, 1600);
+    return () => window.clearInterval(timer);
+  }, [watchClipboard, url]);
 
   useEffect(() => {
     invoke<string>('default_download_dir').then(setDownloadDir).catch(() => {});
@@ -233,7 +251,9 @@ function App() {
             Analyze
           </button>
         </div>
+        {clipboardCandidate && <div className="error" style={{color:'#d8d8d8'}}><Link2 size={16} /> Clipboard link detected <button className="ghost" onClick={() => { setUrl(clipboardCandidate); setClipboardCandidate(''); }}>Use link</button><button className="ghost" onClick={() => setClipboardCandidate('')}>Dismiss</button></div>}
         {error && <div className="error"><XCircle size={16} /> {error}</div>}
+        <label className="checkbox-row" style={{marginTop:10}}><input type="checkbox" checked={watchClipboard} onChange={(e) => setWatchClipboard(e.target.checked)} /><span>Detect copied media links</span></label>
         <div style={{marginTop: 12, display: 'flex', gap: 10}}><textarea value={batchUrls} onChange={(e) => setBatchUrls(e.target.value)} placeholder="Batch URLs — one per line" style={{flex: 1, minHeight: 70}} /><button className="ghost" onClick={startBatch} disabled={!batchUrls.trim() || !downloadDir}><Download size={15}/> Queue batch</button></div>
       </section>
 

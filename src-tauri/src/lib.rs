@@ -213,6 +213,31 @@ async fn analyze_url(url: String) -> Result<VideoInfo, String> {
     })
 }
 
+
+#[tauri::command]
+async fn get_clipboard_text() -> Result<String, String> {
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut c = Command::new("powershell");
+        c.args(["-NoProfile", "-Command", "Get-Clipboard -Raw"]);
+        c
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = Command::new("pbpaste");
+    #[cfg(target_os = "linux")]
+    let mut command = {
+        let mut c = Command::new("sh");
+        c.args(["-c", "command -v wl-paste >/dev/null && wl-paste -n || command -v xclip >/dev/null && xclip -selection clipboard -o || command -v xsel >/dev/null && xsel --clipboard --output"]);
+        c
+    };
+
+    let output = command.output().await.map_err(|e| format!("Could not read clipboard: {e}"))?;
+    if !output.status.success() {
+        return Err("Clipboard integration is unavailable on this system.".into());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
 #[tauri::command]
 fn default_download_dir() -> String {
     dirs::download_dir()
@@ -479,6 +504,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             analyze_url,
+            get_clipboard_text,
             default_download_dir,
             start_download,
             cancel_download,
