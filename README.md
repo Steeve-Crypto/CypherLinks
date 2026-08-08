@@ -8,6 +8,15 @@ CypherLinks is a local-first desktop application for downloading, organizing, an
 
 CypherLinks is intended for content that you own, content made available for download, public-domain media, or material you are otherwise authorized to access. The application does not implement DRM, paywall, or access-control bypass mechanisms.
 
+
+## Current interface
+
+<p align="center">
+  <img src="./assets/cypherlinks-current-ui.png" alt="CypherLinks desktop application interface" width="100%" />
+</p>
+
+The desktop workspace exposes link analysis, download configuration, queue activity, media preview, browser integration, site presets, dependency controls, diagnostics, and application update controls through a single local interface.
+
 ## Key capabilities
 
 ### Media downloads
@@ -54,6 +63,16 @@ CypherLinks uses a native Rust queue for scheduling and download execution.
 - Detect previously completed media
 - Preview downloaded video and audio inside the application
 
+### Keyboard shortcuts
+
+- **Ctrl/Command + L** — focus the URL field
+- **Ctrl/Command + 1** — open Download
+- **Ctrl/Command + 2** — open Queue
+- **Ctrl/Command + 3** — open Settings
+- **Ctrl/Command + Enter** — analyze the current URL
+- **Escape** — close the active dialog
+- **?** — display the shortcut reference
+
 ### Clipboard integration
 
 Clipboard detection is available under **Settings → Clipboard detection**. When enabled, CypherLinks monitors the local clipboard for HTTP or HTTPS URLs and presents detected links in the Download workspace.
@@ -80,6 +99,22 @@ After installation, use the CypherLinks extension button or the browser context 
 Download profiles can be saved by hostname. After configuring a profile, select **Save site preset**. When a URL from the same hostname is analyzed later, CypherLinks automatically applies the saved profile.
 
 Saved profiles can be reviewed, applied, updated, or removed under **Settings → Site presets**. Proxy credentials and proxy addresses are intentionally excluded from saved site presets.
+
+## Production readiness
+
+CypherLinks includes a production-oriented desktop reliability layer:
+
+- First-run onboarding with automatic yt-dlp and FFmpeg readiness checks
+- Guided dependency installation when required tools are unavailable
+- Drag-and-drop ingestion for URL files, text files containing links, and local media
+- Keyboard navigation for URL focus, primary tabs, analysis, and dialog dismissal
+- Local crash diagnostics with an explicit diagnostics-folder control
+- Improved loading, empty, retry, and error-reporting states
+- Branded application and installer icons for Windows, macOS, and Linux bundles
+- Tauri signed-update integration with automatic update checks and verified installation
+- Windows CI that builds the Tauri executable and performs a startup smoke test
+
+Update signing secrets are intentionally not stored in the repository. See `RELEASE_SIGNING.md` for the production release procedure.
 
 ## System requirements
 

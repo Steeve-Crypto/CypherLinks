@@ -837,7 +837,7 @@ fn ingest_dropped_paths(paths: Vec<String>) -> Result<serde_json::Value, String>
             media.push(path.to_string_lossy().to_string());
         } else if ["txt", "url", "webloc"].contains(&ext.as_str()) {
             if let Ok(text) = std::fs::read_to_string(&path) {
-                urls.extend(url_re.find_iter(&text).map(|m| m.as_str().trim_end_matches([')', ']', ',', '.']).to_string()));
+                urls.extend(url_re.find_iter(&text).map(|m| m.as_str().trim_end_matches(|c: char| matches!(c, ')' | ']' | ',' | '.')).to_string()));
             }
         }
     }
