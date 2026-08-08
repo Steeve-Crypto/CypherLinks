@@ -243,3 +243,6 @@ kbd { padding:3px 7px; border:1px solid #3b3b42; border-bottom-width:2px; border
 @media (max-width:700px){.loading-card{grid-template-columns:1fr}.loading-label{position:static}.skeleton-thumb{width:100%}}
 .brand-logo { overflow:hidden; background:#080b14; border-color:#263750; }
 .brand-logo img { width:100%; height:100%; object-fit:cover; display:block; }
+.drop-overlay { position:fixed; inset:18px; z-index:90; pointer-events:none; display:grid; place-content:center; justify-items:center; gap:8px; border:1px dashed #4f6688; border-radius:20px; background:rgba(7,9,15,.88); backdrop-filter:blur(12px); box-shadow:inset 0 0 0 1px rgba(79,102,136,.16); color:var(--text); }
+.drop-overlay span { color:var(--muted); font-size:13px; }
+.drag-active .topbar { opacity:.55; }

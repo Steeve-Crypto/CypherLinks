@@ -179,6 +179,7 @@ function App() {
   const [autoUpdates, setAutoUpdates] = useState(() => localStorage.getItem('cypherlinks-auto-updates') !== 'false');
   const [updateMessage, setUpdateMessage] = useState('');
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
   const urlInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -244,7 +245,7 @@ function App() {
           setActiveTab('download');
         }
         if (dropped.media.length) {
-          const imported = dropped.media.map((path) => ({ id: crypto.randomUUID(), url: path, title: path.split(/[\\/]/).pop() || path, mode: 'video' as OutputMode, quality: 'local', priority: 0, progress: 100, status: 'finished' as DownloadStatus, filename: path, message: 'Imported local media' }));
+          const imported = dropped.media.map((path) => { const audio = /\.(mp3|m4a|aac|wav|flac|ogg)$/i.test(path); return { id: crypto.randomUUID(), url: path, title: path.split(/[\\/]/).pop() || path, mode: (audio ? 'audio' : 'video') as OutputMode, quality: 'local', priority: 0, progress: 100, status: 'finished' as DownloadStatus, filename: path, message: 'Imported local media' }; });
           setItems((current) => [...imported, ...current]);
           setNotice(`Imported ${dropped.media.length} local media file${dropped.media.length === 1 ? '' : 's'}.`);
           setActiveTab('queue');
@@ -539,6 +540,20 @@ function App() {
     }
   }
 
+  function handleTextDrop(event: React.DragEvent<HTMLElement>) {
+    event.preventDefault();
+    setDragActive(false);
+    const raw = event.dataTransfer.getData('text/uri-list') || event.dataTransfer.getData('text/plain');
+    const links = raw.split(/\s+/).map((value) => value.trim()).filter((value) => /^https?:\/\//i.test(value));
+    if (!links.length) return;
+    setUrl(links[0]);
+    if (links.length > 1) setBatchUrls(links.join('\n'));
+    setInfo(null);
+    setError('');
+    setActiveTab('download');
+    setNotice(`Received ${links.length} dropped link${links.length === 1 ? '' : 's'}.`);
+  }
+
   async function checkAppUpdate(silent = false) {
     if (!silent) setUpdateMessage('Checking for signed updates…');
     try {
@@ -562,7 +577,7 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${dragActive ? 'drag-active' : ''}`} onDragEnter={(event) => { event.preventDefault(); setDragActive(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (event.currentTarget === event.target) setDragActive(false); }} onDrop={handleTextDrop}>
       <header className="topbar">
         <div className="brand-lockup">
           <div className="brand-mark brand-logo"><img src="/cypherlinks-icon.png" alt="" /></div>
@@ -585,6 +600,7 @@ function App() {
       </header>
 
       {notice && <div className="toast"><CheckCircle2 size={15} /> {notice}</div>}
+      {dragActive && <div className="drop-overlay"><Link2 size={24} /><strong>Drop into CypherLinks</strong><span>Links, URL lists, and local media are supported.</span></div>}
 
       {activeTab === 'download' && (
         <div className="page-grid">
