@@ -145,10 +145,13 @@ struct DownloadRequest {
     split_chapters: bool,
     #[serde(default = "default_transcode_preset")]
     transcode_preset: String,
+    #[serde(default = "default_post_action")]
+    post_action: String,
 }
 
 fn default_duplicate_policy() -> String { "skip".into() }
 fn default_transcode_preset() -> String { "source".into() }
+fn default_post_action() -> String { "none".into() }
 
 #[derive(Debug, Serialize, Clone)]
 struct ProgressPayload {
@@ -376,6 +379,41 @@ async fn transcode_media(input: &str, preset: &str, overwrite: bool) -> Result<O
     Ok(Some(output.to_string_lossy().to_string()))
 }
 
+
+async fn perform_post_action(path: &str, action: &str) -> Result<(), String> {
+    if action == "none" || action.trim().is_empty() {
+        return Ok(());
+    }
+    let file = PathBuf::from(path);
+    let target = if action == "open-folder" {
+        file.parent().unwrap_or_else(|| Path::new(".")).to_path_buf()
+    } else {
+        file.clone()
+    };
+
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut c = Command::new("explorer");
+        c.arg(&target);
+        c
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut c = Command::new("open");
+        c.arg(&target);
+        c
+    };
+    #[cfg(target_os = "linux")]
+    let mut command = {
+        let mut c = Command::new("xdg-open");
+        c.arg(&target);
+        c
+    };
+
+    command.spawn().map_err(|e| format!("Could not run post-download action: {e}"))?;
+    Ok(())
+}
+
 async fn run_download(app: AppHandle, request: DownloadRequest, cancel: Arc<AtomicBool>) -> Result<(), String> {
     if !ffmpeg_available() {
         return Err("FFmpeg is not installed. Run the included setup script first.".into());
@@ -571,6 +609,14 @@ async fn run_download(app: AppHandle, request: DownloadRequest, cancel: Arc<Atom
                         });
                         if let Some(converted) = transcode_media(&source, &request.transcode_preset, request.duplicate_policy == "overwrite").await? {
                             final_name = Some(converted);
+                        }
+                    }
+                    if let Some(path) = final_name.as_deref() {
+                        if let Err(action_error) = perform_post_action(path, &request.post_action).await {
+                            emit(&app, ProgressPayload {
+                                id: request.id.clone(), status: "processing".into(), percent: Some(100.0),
+                                speed: None, eta: None, filename: final_name.clone(), message: Some(action_error),
+                            });
                         }
                     }
                     emit(&app, ProgressPayload {
