@@ -1026,6 +1026,22 @@ fn load_runtime_config(app: AppHandle) -> RuntimeConfig { load_runtime_config_fi
 #[tauri::command]
 fn save_runtime_config(app: AppHandle, config: RuntimeConfig) -> Result<(), String> { save_runtime_config_file(&app, &config) }
 
+
+#[tauri::command]
+fn export_settings_bundle(destination: String, bundle: Value) -> Result<String, String> {
+    let envelope = serde_json::json!({"schema":"cypherlinks.settings.v1","exportedAtMs":unix_time_ms(),"data":bundle});
+    std::fs::write(&destination, serde_json::to_vec_pretty(&envelope).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    Ok(destination)
+}
+
+#[tauri::command]
+fn import_settings_bundle(source: String) -> Result<Value, String> {
+    let raw = std::fs::read_to_string(source).map_err(|e| e.to_string())?;
+    let envelope: Value = serde_json::from_str(&raw).map_err(|e| format!("Invalid settings bundle: {e}"))?;
+    if envelope.get("schema").and_then(Value::as_str) != Some("cypherlinks.settings.v1") { return Err("Unsupported CypherLinks settings schema.".into()); }
+    envelope.get("data").cloned().ok_or_else(|| "Settings bundle has no data section.".into())
+}
+
 #[tauri::command]
 fn export_runtime_config(app: AppHandle, destination: String) -> Result<String, String> {
     let source = config_path(&app)?; if !source.exists() { save_runtime_config_file(&app, &RuntimeConfig::default())?; }
@@ -1117,6 +1133,8 @@ pub fn run() {
             open_diagnostics_folder,
             load_runtime_config,
             save_runtime_config,
+            export_settings_bundle,
+            import_settings_bundle,
             export_runtime_config,
             import_runtime_config,
             portable_mode_status,

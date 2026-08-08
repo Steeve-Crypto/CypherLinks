@@ -604,12 +604,23 @@ function App() {
 
   async function exportSettings() {
     const destination = await save({ defaultPath: 'cypherlinks-settings.json', filters: [{ name: 'CypherLinks settings', extensions: ['json'] }] });
-    if (typeof destination === 'string') await invoke('export_runtime_config', { destination }).then(() => setToolMessage(`Settings exported to ${destination}`)).catch((reason) => setToolMessage(String(reason)));
+    if (typeof destination !== 'string') return;
+    const bundle = { runtimeConfig, sitePresets, filenameTemplate, maxConcurrent, watchClipboard, autoUpdates };
+    await invoke<string>('export_settings_bundle', { destination, bundle }).then((path) => setToolMessage(`Settings exported to ${path}`)).catch((reason) => setToolMessage(String(reason)));
   }
 
   async function importSettings() {
     const source = await open({ multiple: false, filters: [{ name: 'CypherLinks settings', extensions: ['json'] }] });
-    if (typeof source === 'string') await invoke<RuntimeConfig>('import_runtime_config', { source }).then((config) => { setRuntimeConfig(config); setToolMessage('Settings imported successfully.'); }).catch((reason) => setToolMessage(String(reason)));
+    if (typeof source !== 'string') return;
+    await invoke<any>('import_settings_bundle', { source }).then(async (bundle) => {
+      if (bundle.runtimeConfig) { setRuntimeConfig(bundle.runtimeConfig); await invoke('save_runtime_config', { config: bundle.runtimeConfig }); }
+      if (bundle.sitePresets) setSitePresets(bundle.sitePresets);
+      if (typeof bundle.filenameTemplate === 'string') setFilenameTemplate(bundle.filenameTemplate);
+      if (typeof bundle.maxConcurrent === 'number') setMaxConcurrent(bundle.maxConcurrent);
+      if (typeof bundle.watchClipboard === 'boolean') setWatchClipboard(bundle.watchClipboard);
+      if (typeof bundle.autoUpdates === 'boolean') setAutoUpdates(bundle.autoUpdates);
+      setToolMessage('CypherLinks settings and presets imported successfully.');
+    }).catch((reason) => setToolMessage(String(reason)));
   }
 
   async function togglePortable(enabled: boolean) {
