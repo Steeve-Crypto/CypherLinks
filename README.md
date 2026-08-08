@@ -1,5 +1,9 @@
 # CypherLinks
 
+<p align="center">
+  <img src="./assets/cypherlinks-logo.png" alt="CypherLinks logo" width="420" />
+</p>
+
 CypherLinks is a local-first desktop application for downloading, organizing, and processing authorized online media. It combines a Tauri 2 desktop shell, a React and TypeScript interface, a Rust backend, yt-dlp for media extraction, and FFmpeg for media processing.
 
 CypherLinks is intended for content that you own, content made available for download, public-domain media, or material you are otherwise authorized to access. The application does not implement DRM, paywall, or access-control bypass mechanisms.
