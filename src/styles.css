@@ -241,3 +241,5 @@ kbd { padding:3px 7px; border:1px solid #3b3b42; border-bottom-width:2px; border
 .error-banner { align-items:flex-start; flex-wrap:wrap; }.error-banner span{flex:1;min-width:220px}.error-banner button{border:0;background:transparent;color:var(--text);padding:0 4px;font-size:12px;text-decoration:underline;text-underline-offset:3px}
 @keyframes shimmer { to { background-position:-220% 0; } }
 @media (max-width:700px){.loading-card{grid-template-columns:1fr}.loading-label{position:static}.skeleton-thumb{width:100%}}
+.brand-logo { overflow:hidden; background:#080b14; border-color:#263750; }
+.brand-logo img { width:100%; height:100%; object-fit:cover; display:block; }

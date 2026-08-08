@@ -565,7 +565,7 @@ function App() {
     <main className="app-shell">
       <header className="topbar">
         <div className="brand-lockup">
-          <div className="brand-mark">CL</div>
+          <div className="brand-mark brand-logo"><img src="/cypherlinks-icon.png" alt="" /></div>
           <div>
             <strong>CypherLinks</strong>
             <span>Local media workspace</span>
@@ -886,7 +886,7 @@ function App() {
       {onboardingOpen && (
         <div className="modal-backdrop onboarding-backdrop">
           <section className="onboarding-card" role="dialog" aria-modal="true" aria-label="Welcome to CypherLinks">
-            <div className="onboarding-brand"><div className="brand-mark">CL</div><span>CypherLinks</span></div>
+            <div className="onboarding-brand"><div className="brand-mark brand-logo"><img src="/cypherlinks-icon.png" alt="" /></div><span>CypherLinks</span></div>
             <span className="kicker">FIRST RUN</span>
             <h1>Your local media workspace is ready.</h1>
             <p>CypherLinks keeps download history and settings on this device. Before the first download, confirm the two required media tools.</p>
