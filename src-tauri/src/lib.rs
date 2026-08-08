@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     collections::HashMap,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Stdio,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -143,9 +143,12 @@ struct DownloadRequest {
     duplicate_policy: String,
     #[serde(default)]
     split_chapters: bool,
+    #[serde(default = "default_transcode_preset")]
+    transcode_preset: String,
 }
 
 fn default_duplicate_policy() -> String { "skip".into() }
+fn default_transcode_preset() -> String { "source".into() }
 
 #[derive(Debug, Serialize, Clone)]
 struct ProgressPayload {
@@ -303,6 +306,76 @@ fn output_filename(line: &str) -> Option<String> {
     re.captures(line).and_then(|c| c.get(1)).map(|m| m.as_str().to_string())
 }
 
+fn final_filepath(line: &str) -> Option<String> {
+    line.split_once("LF_FILE|").map(|(_, path)| path.trim().to_string()).filter(|path| !path.is_empty())
+}
+
+fn unique_variant_path(input: &Path, label: &str, extension: &str, overwrite: bool) -> PathBuf {
+    let parent = input.parent().unwrap_or_else(|| Path::new("."));
+    let stem = input.file_stem().and_then(|value| value.to_str()).unwrap_or("media");
+    let first = parent.join(format!("{stem} [{label}].{extension}"));
+    if overwrite || !first.exists() {
+        return first;
+    }
+    for index in 2..10_000 {
+        let candidate = parent.join(format!("{stem} [{label} {index}].{extension}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    parent.join(format!("{stem} [{label} copy].{extension}"))
+}
+
+async fn transcode_media(input: &str, preset: &str, overwrite: bool) -> Result<Option<String>, String> {
+    if preset == "source" || preset.trim().is_empty() {
+        return Ok(None);
+    }
+    if !ffmpeg_available() {
+        return Err("FFmpeg is required for transcoding presets.".into());
+    }
+
+    let input_path = PathBuf::from(input);
+    if !input_path.exists() {
+        return Err("Downloaded file could not be found for transcoding.".into());
+    }
+
+    let (label, extension, args): (&str, &str, Vec<&str>) = match preset {
+        "phone" => ("phone", "mp4", vec![
+            "-map", "0:v:0?", "-map", "0:a:0?",
+            "-vf", "scale=1280:-2:force_original_aspect_ratio=decrease",
+            "-c:v", "libx264", "-preset", "medium", "-crf", "23",
+            "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart",
+        ]),
+        "desktop" => ("desktop", "mp4", vec![
+            "-map", "0:v:0?", "-map", "0:a:0?",
+            "-c:v", "libx264", "-preset", "medium", "-crf", "19",
+            "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
+        ]),
+        "archive" => ("archive", "mkv", vec![
+            "-map", "0:v:0?", "-map", "0:a:0?",
+            "-c:v", "libx264", "-preset", "slow", "-crf", "18", "-c:a", "flac",
+        ]),
+        "audio-library" => ("audio library", "m4a", vec![
+            "-vn", "-c:a", "aac", "-b:a", "256k", "-movflags", "+faststart",
+        ]),
+        _ => return Err("Unknown transcode preset.".into()),
+    };
+
+    let output = unique_variant_path(&input_path, label, extension, overwrite);
+    let mut command = Command::new("ffmpeg");
+    command.arg(if overwrite { "-y" } else { "-n" });
+    command.arg("-i").arg(&input_path);
+    command.args(args);
+    command.arg(&output);
+    let result = command.output().await.map_err(|e| format!("Could not start FFmpeg: {e}"))?;
+    if !result.status.success() {
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        let tail = stderr.lines().rev().take(8).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");
+        return Err(format!("FFmpeg transcoding failed: {tail}"));
+    }
+    Ok(Some(output.to_string_lossy().to_string()))
+}
+
 async fn run_download(app: AppHandle, request: DownloadRequest, cancel: Arc<AtomicBool>) -> Result<(), String> {
     if !ffmpeg_available() {
         return Err("FFmpeg is not installed. Run the included setup script first.".into());
@@ -337,6 +410,8 @@ async fn run_download(app: AppHandle, request: DownloadRequest, cancel: Arc<Atom
         "--output".into(),
         output_template,
         "--windows-filenames".into(),
+        "--print".into(),
+        "after_move:LF_FILE|%(filepath)s".into(),
     ]);
 
     if let Some(browser) = request.cookies_browser.as_ref().filter(|v| !v.is_empty() && *v != "none") {
@@ -464,7 +539,9 @@ async fn run_download(app: AppHandle, request: DownloadRequest, cancel: Arc<Atom
         tokio::select! {
             maybe_line = rx.recv() => {
                 if let Some(line) = maybe_line {
-                    if let Some(name) = output_filename(&line) {
+                    if let Some(path) = final_filepath(&line) {
+                        last_filename = Some(path);
+                    } else if let Some(name) = output_filename(&line) {
                         last_filename = Some(name);
                     }
                     if let Some((percent, speed, eta)) = parse_progress(&line) {
@@ -485,9 +562,20 @@ async fn run_download(app: AppHandle, request: DownloadRequest, cancel: Arc<Atom
             status = child.wait() => {
                 let status = status.map_err(|e| format!("yt-dlp process failed: {e}"))?;
                 if status.success() {
+                    let mut final_name = last_filename.clone();
+                    if request.transcode_preset != "source" {
+                        let source = final_name.clone().ok_or("yt-dlp did not report the final media path.")?;
+                        emit(&app, ProgressPayload {
+                            id: request.id.clone(), status: "processing".into(), percent: Some(100.0),
+                            speed: None, eta: None, filename: final_name.clone(), message: Some(format!("Creating {} preset", request.transcode_preset)),
+                        });
+                        if let Some(converted) = transcode_media(&source, &request.transcode_preset, request.duplicate_policy == "overwrite").await? {
+                            final_name = Some(converted);
+                        }
+                    }
                     emit(&app, ProgressPayload {
                         id: request.id.clone(), status: "finished".into(), percent: Some(100.0),
-                        speed: None, eta: None, filename: last_filename, message: Some("Saved successfully".into()),
+                        speed: None, eta: None, filename: final_name, message: Some("Saved successfully".into()),
                     });
                     return Ok(());
                 }
