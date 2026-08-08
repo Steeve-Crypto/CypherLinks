@@ -249,3 +249,23 @@ Users are responsible for ensuring that downloads comply with applicable law, pl
 ## Validation
 
 The TypeScript/TSX source, extension JavaScript, and JSON configuration can be validated independently of platform-specific desktop dependencies. A complete native Tauri build additionally requires the Rust toolchain and the operating-system dependencies listed above.
+
+## Automation and resilience
+
+CypherLinks includes a native automation layer for repeatable workflows and resilient long-running queues.
+
+- **Download rules** apply quality, mode, priority, transfer limits, and transcoding defaults to matching domains.
+- **Per-domain limits** override global bandwidth caps for selected hosts.
+- **Automatic format fallback** prefers requested codecs and resolution, then falls back to the best compatible stream when the preferred combination is unavailable.
+- **Queue persistence** stores waiting and scheduled jobs in the application data directory and restores them after a restart.
+- **SHA-256 verification** can validate the final downloaded or transcoded file against an expected checksum.
+- **Settings import/export** moves runtime rules, domain limits, provider adapters, and telemetry preferences between installations.
+- **Portable mode** stores runtime state beside the executable when `portable.flag` is enabled.
+- **Provider adapters** attach host-specific yt-dlp arguments without modifying the core downloader.
+- **Local REST API and CLI** support localhost automation and headless scripted downloads. See `API.md`.
+- **History search and filters** make completed, failed, queued, and scheduled jobs easier to locate.
+- **Telemetry is opt-in** and records only coarse local release counters; URLs, titles, filenames, and media metadata are excluded.
+
+### Privacy model
+
+CypherLinks is local-first. Runtime configuration, queue state, diagnostics, history, and opt-in telemetry remain on the device. The localhost API binds only to `127.0.0.1`. Provider credentials should not be embedded in provider-adapter arguments or committed to source control.
