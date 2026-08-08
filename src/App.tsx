@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import {
@@ -15,6 +15,8 @@ import {
   Square,
   Trash2,
   Video,
+  Eye,
+  X,
   XCircle,
 } from 'lucide-react';
 
@@ -117,6 +119,7 @@ function App() {
   const [splitChapters, setSplitChapters] = useState(false);
   const [transcodePreset, setTranscodePreset] = useState('source');
   const [postAction, setPostAction] = useState('none');
+  const [previewItem, setPreviewItem] = useState<DownloadItem | null>(null);
   const [watchClipboard, setWatchClipboard] = useState(() => localStorage.getItem('linkforge-watch-clipboard') === 'true');
   const [clipboardCandidate, setClipboardCandidate] = useState('');
 
@@ -413,14 +416,29 @@ function App() {
                     {item.message && <span className="message">{item.message}</span>}
                   </div>
                 </div>
-                {['queued', 'downloading', 'processing'].includes(item.status) && (
-                  <button className="icon-button" onClick={() => cancel(item.id)} title="Cancel"><Square size={15} fill="currentColor" /></button>
-                )}
+                <div style={{display:'flex', gap:6}}>
+                  {item.status === 'finished' && item.filename && <button className="icon-button" onClick={() => setPreviewItem(item)} title="Preview"><Eye size={15} /></button>}
+                  {['queued', 'downloading', 'processing'].includes(item.status) && (
+                    <button className="icon-button" onClick={() => cancel(item.id)} title="Cancel"><Square size={15} fill="currentColor" /></button>
+                  )}
+                </div>
               </article>
             ))}
           </div>
         )}
       </section>
+
+      {previewItem?.filename && (
+        <div className="preview-backdrop" onClick={() => setPreviewItem(null)}>
+          <section className="preview-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="section-head"><div><p className="eyebrow">PREVIEW</p><h3>{previewItem.title}</h3></div><button className="icon-button" onClick={() => setPreviewItem(null)}><X size={16}/></button></div>
+            {previewItem.mode === 'audio' || /\.(mp3|m4a|aac|flac|wav|ogg)$/i.test(previewItem.filename)
+              ? <audio src={convertFileSrc(previewItem.filename)} controls autoPlay className="media-player audio-player" />
+              : <video src={convertFileSrc(previewItem.filename)} controls autoPlay className="media-player" />}
+            <div className="download-meta">{previewItem.filename}</div>
+          </section>
+        </div>
+      )}
 
       <footer>
         LinkForge does not bypass DRM or access controls. Use it only for media you own or have permission to download.
